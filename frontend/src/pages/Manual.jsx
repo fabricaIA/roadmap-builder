@@ -23,12 +23,13 @@ export default function Manual() {
         </li>
         <li>
           Escopos do PAT: <code>repo</code> sempre; <code>project</code> para
-          criar/vincular painéis Projects V2; <code>read:org</code> para os
-          dashboards por organização.
+          criar/vincular painéis Projects V2 e ler o campo <em>Status</em> no
+          Board; <code>read:org</code> para os dashboards por organização.
         </li>
         <li>
           Em Perfil você também define padrões (título do painel, data de
-          início, nomes dos campos de data).
+          início, nomes dos campos de data) e pode <strong>sincronizar</strong>{" "}
+          suas organizações e papéis.
         </li>
       </ul>
 
@@ -82,48 +83,55 @@ export default function Manual() {
       </ol>
       <p>
         A criação de issues é idempotente: reexecutar não duplica (as existentes
-        são atualizadas).
+        são atualizadas). Só as fases marcadas são criadas agora; o config
+        completo fica salvo no projeto para aplicar as demais depois.
       </p>
 
-      <h2>4. Tela do projeto e aplicação por fase</h2>
+      <h2>4. Tela do projeto</h2>
       <ul>
         <li>
-          A tela do projeto mostra contagens de issues e o estado de cada fase (
-          <em>não criada / parcial / criada</em>).
+          <strong>Fases</strong> — estado de cada fase (
+          <em>não criada / parcial / criada</em>). "Aplicar Fase" cria as issues
+          daquela fase (e só as dela). Reaplicar uma fase completa: por padrão é
+          no-op; marque "Alertar se a fase já foi criada" para receber um aviso.
+          O histórico registra cada aplicação.
         </li>
         <li>
-          <strong>Aplicar Fase</strong> cria as issues daquela fase (e só as
-          dela). Reaplicar uma fase completa: por padrão é no-op; marque
-          "Alertar se a fase já foi criada" para receber um aviso em vez disso.
+          <strong>Board</strong> (aba) — as issues daquele repositório em
+          colunas (ver seção 6).
         </li>
-        <li>O histórico registra cada aplicação de fase.</li>
       </ul>
 
-      <h2>5. Organização e papéis</h2>
+      <h2>5. Organização, tenant e papéis</h2>
       <ul>
         <li>
           O <strong>tenant</strong> é a organização do GitHub. No login (ou
-          sincronizando pelo Perfil) o app lê suas orgs e o papel:
-          <code> admin</code> → <strong>coordenador</strong>,{" "}
-          <code>member</code> → <strong>dev</strong>.
+          sincronizando pelo Perfil) o app lê suas orgs e o papel:{" "}
+          <code>admin</code> → <strong>coordenador</strong>, <code>member</code>{" "}
+          → <strong>dev</strong>.
         </li>
         <li>
-          Há também um <strong>tenant pessoal</strong> (sua conta) no seletor —
-          consolida os projetos de repositórios pessoais, sem depender de uma
-          organização.
+          Há também um <strong>tenant pessoal</strong> (sua conta), sempre no
+          topo do seletor — consolida os projetos de repositórios pessoais, sem
+          depender de uma organização. Você é coordenador do seu tenant pessoal.
         </li>
         <li>Escolha o tenant no seletor do cabeçalho.</li>
+        <li>
+          Um projeto pertence ao tenant <code>X</code> quando seu owner é{" "}
+          <code>X</code> — assim o coordenador vê os projetos registrados por
+          qualquer dev daquele tenant.
+        </li>
       </ul>
 
-      <h2>6. Dashboards</h2>
+      <h2>6. Dashboards e Board</h2>
       <ul>
         <li>
           <strong>Minhas issues</strong> — issues em que você é autor ou
-          responsável, nos projetos de roadmap da organização.
+          responsável, nos projetos do tenant.
         </li>
         <li>
           <strong>Issues da organização</strong> — todas as issues dos projetos
-          da org. Coordenador vê também o recorte por desenvolvedor.
+          do tenant. Coordenador vê também o recorte por desenvolvedor.
         </li>
         <li>
           <strong>Board</strong> — colunas com as issues que existem no GitHub.
@@ -131,7 +139,7 @@ export default function Manual() {
           mesma representação do GitHub; sem Project vinculado, cai em
           aberta/fechada), Fase/Milestone, Responsável ou Aberta/Fechada.
           Filtros: repositório, milestone, responsável (assign to), label e
-          estado. Cada card abre a issue no GitHub. Há o Board da organização
+          estado. Cada card abre a issue no GitHub. Existe o Board do tenant
           (menu) e o Board de um projeto (aba "Board" na tela do projeto).
         </li>
         <li>
@@ -139,12 +147,76 @@ export default function Manual() {
           desenvolvedor e por fase.
         </li>
         <li>
-          Os números vêm ao vivo do GitHub (cache de ~60s). Repositórios sem
-          acesso aparecem numa lista de avisos, sem quebrar a página.
+          Os dados vêm ao vivo do GitHub (cache de ~60s; botão "Atualizar" no
+          Board). Repositórios sem acesso aparecem numa lista de avisos, sem
+          quebrar a página.
         </li>
       </ul>
 
-      <h2>7. Linha de comando</h2>
+      <h2>7. Como testar a visão consolidada por organização</h2>
+      <p>
+        A visão consolidada é o <strong>Board do tenant</strong> +{" "}
+        <strong>Issues da organização</strong>: agregam as issues de{" "}
+        <em>todos</em> os projetos daquele tenant, registrados por qualquer
+        usuário.
+      </p>
+      <p>
+        <strong>
+          Sem uma organização real (recomendado para demonstração):
+        </strong>
+      </p>
+      <ol>
+        <li>
+          PAT no perfil com <code>repo</code> (e <code>project</code> se quiser
+          o agrupamento por Status).
+        </li>
+        <li>
+          Registre 2 ou mais projetos sob a sua conta (pela wizard ou
+          "Importar"), aplicando ao menos a Fase M1 em cada.
+        </li>
+        <li>
+          No seletor do cabeçalho, escolha o tenant <strong>(pessoal)</strong> →{" "}
+          <strong>Board</strong> e <strong>Issues da organização</strong>{" "}
+          consolidam os dois repositórios. Alterne o agrupamento e os filtros.
+        </li>
+      </ol>
+      <p>
+        <strong>
+          Com uma organização do GitHub (teste completo, com papéis):
+        </strong>
+      </p>
+      <ol>
+        <li>
+          Org com 2+ repositórios; PAT com <code>repo</code> +{" "}
+          <code>project</code> + <code>read:org</code>.
+        </li>
+        <li>
+          Faça login (a org aparece no seletor; se não, sincronize no Perfil).
+          Owner da org → coordenador; member → dev.
+        </li>
+        <li>
+          Crie 2 projetos pela wizard para repos da org, aplicando M1 em cada.
+          Opcional: crie o Project V2 e defina o Status de algumas issues.
+        </li>
+        <li>
+          Selecione a org → Board / Issues da organização consolidam os repos;
+          "Devs" mostra a matriz por desenvolvedor.
+        </li>
+        <li>
+          Papéis: uma segunda conta que é <code>member</code> (não owner) da org
+          faz login → vê Board e Issues da org, mas "Devs" some do menu e
+          retorna 403.
+        </li>
+      </ol>
+      <p>
+        Verificação rápida por API (com o cookie de sessão):{" "}
+        <code>GET /api/orgs</code> (o 1º item é o tenant pessoal),{" "}
+        <code>GET /api/dashboards/org-issues?org=&lt;login&gt;</code>,{" "}
+        <code>GET /api/dashboards/devs?org=&lt;login&gt;</code> (200 para
+        coordenador, 403 para member).
+      </p>
+
+      <h2>8. Linha de comando</h2>
       <p>
         O mesmo motor está em <code>scripts/roadmap_builder.py</code>. Ex.:{" "}
         <code>
