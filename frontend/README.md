@@ -8,23 +8,28 @@ O **Roadmap Builder** é uma ferramenta de automação para gestão de projetos 
 
 ## 2. Como Iniciar a Aplicação
 
-Para executar o ambiente de desenvolvimento localmente, abra terminais separados e execute os comandos:
+Requer um `.env` na raiz (ver `.env.example`) e um OAuth App do GitHub. Detalhes no
+`README.md` da raiz. Em terminais separados:
 
 ### Backend (API)
 
 ```bash
-cd backend
-py -m uvicorn backend.api.api:app --reload
-
+# na raiz do repositório
+pip install -r requirements-dev.txt
+alembic upgrade head
+uvicorn backend.app.main:app --reload --port 8000
 ```
 
 ### Frontend (Interface)
 
 ```bash
 cd frontend
-npm run dev
-
+npm install
+npm run dev   # Vite serve :5173 e faz proxy de /api -> :8000
 ```
+
+O acesso ao GitHub agora usa o **PAT configurado no perfil** do usuário logado —
+não há mais campo de token no wizard.
 
 ---
 

@@ -565,3 +565,79 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   transform: translateY(-1px);
   filter: brightness(0.95);
 }
+
+/* --- Shell multiusuário (PR1) --- */
+.app-root {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e3e6ea;
+}
+
+.app-brand {
+  font-weight: 800;
+  color: #1f2d3d;
+  text-decoration: none;
+}
+
+.app-nav {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+
+.app-nav a {
+  color: #4a5568;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.app-nav a:hover {
+  color: #1f2d3d;
+}
+
+.app-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #4a5568;
+}
+
+.app-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+.page {
+  max-width: 900px;
+  margin: 32px auto;
+  padding: 0 24px;
+}
+
+.page-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  color: #666;
+}
+
+.home-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.home-actions a {
+  text-decoration: none;
+}
