@@ -11,7 +11,11 @@ __pycache__/
 .venv/
 env/
 venv/
-*.env
+
+# Env files (não versionar segredos; use .env.example)
+.env
+.env.*
+!.env.example
 
 # Node / Frontend
 node_modules/
