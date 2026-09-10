@@ -140,8 +140,10 @@ def build_roadmap(
 
     # Milestones / labels / issues
     try:
-        milestones = ensure_milestones(owner, repo, token, cfg, apply, due_dates)
-        ensure_labels(owner, repo, token, cfg, apply)
+        milestones = ensure_milestones(
+            owner, repo, token, cfg, apply, due_dates, phase_keys=phase_keys
+        )
+        ensure_labels(owner, repo, token, cfg, apply, phase_keys=phase_keys)
         issue_results = ensure_issues(
             owner, repo, token, cfg, milestones, apply, issue_schedule, phase_keys
         )
@@ -298,8 +300,10 @@ def apply_phase(
                 ],
             }
 
-        milestones = ensure_milestones(owner, repo, token, cfg, True, due_dates)
-        ensure_labels(owner, repo, token, cfg, True)
+        milestones = ensure_milestones(
+            owner, repo, token, cfg, True, due_dates, phase_keys=[phase_key]
+        )
+        ensure_labels(owner, repo, token, cfg, True, phase_keys=[phase_key])
         results = ensure_issues(
             owner, repo, token, cfg, milestones, True, issue_schedule, [phase_key]
         )

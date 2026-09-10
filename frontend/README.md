@@ -107,7 +107,7 @@ A aplicação envia os dados para o endpoint `POST /api/build-roadmap`. O payloa
 
 - **React State Management:** A aplicação utiliza o `useState` para gerenciar estados complexos e aninhados (Milestones, Labels e Issues), permitindo adição/remoção dinâmica de elementos.
 - **Identidade Visual:** A aplicação possui um esquema de cores corporativo focado em azul e laranja, com transições suaves e design responsivo, acompanhado de tela de boas-vindas customizada.
-- **Integração com GitHub:** O cabeçalho da requisição (`github-token`) garante que a autenticação seja processada com segurança pelo backend.
+- **Integração com GitHub:** O usuário autentica via OAuth (login) e guarda um PAT no perfil; o backend usa esse PAT (cifrado) para as operações no GitHub. Não há mais token no formulário.
 - **Favicon:** Configurado para exibir a logo em contraste adequado na aba do navegador.
 
 ---

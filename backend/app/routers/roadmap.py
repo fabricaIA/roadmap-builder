@@ -23,6 +23,8 @@ class RoadmapPayload(BaseModel):
     project_title: str = "RoadmapBuilder"
     project_number: int | None = None
     project_start_date: str | None = None
+    # Fases (milestone keys) a criar agora. None/vazio = todas.
+    phase_keys: list[str] | None = None
     config: dict[str, Any]
 
 
@@ -58,4 +60,5 @@ def post_build_roadmap(
         project_number=payload.project_number,
         project_start_date=payload.project_start_date,
         cfg=payload.config,
+        phase_keys=payload.phase_keys or None,
     )

@@ -410,6 +410,22 @@ def paginate_get(base_url: str, token: str, per_page: int = 100) -> list[dict[st
     return items
 
 
+def phases_filter(phase_keys: list[str] | None) -> set[str] | None:
+    return None if phase_keys is None else set(phase_keys)
+
+
+def phase_label_names(cfg: dict[str, Any], phase_keys: list[str] | None) -> set[str] | None:
+    """Nomes das labels usadas pelas issues das fases dadas (None = todas)."""
+    keys = phases_filter(phase_keys)
+    if keys is None:
+        return None
+    used: set[str] = set()
+    for issue in cfg["issues"]:
+        if issue["milestone"] in keys:
+            used.update(issue.get("labels", []))
+    return used
+
+
 def ensure_milestones(
     owner: str,
     repo: str,
@@ -417,12 +433,19 @@ def ensure_milestones(
     cfg: dict[str, Any],
     apply: bool,
     due_dates: dict[str, date],
+    phase_keys: list[str] | None = None,
 ) -> dict[str, int]:
+    keys = phases_filter(phase_keys)
+    selected = [
+        m for m in cfg["milestones"] if keys is None or m["key"] in keys
+    ]
     url = f"{API}/repos/{owner}/{repo}/milestones?state=all&per_page=100"
     if not apply:
         print(f"[DRY-RUN] Consultaria milestones: {url}")
-        for milestone, due_on in due_dates.items():
-            print(f"[DRY-RUN] Milestone {milestone} teria data alvo {iso_date(due_on)}")
+        for m in selected:
+            due_on = due_dates.get(m["key"])
+            if due_on:
+                print(f"[DRY-RUN] Milestone {m['key']} teria data alvo {iso_date(due_on)}")
         return {}
 
     current = paginate_get(
@@ -431,7 +454,7 @@ def ensure_milestones(
     by_title = {m["title"]: m["number"] for m in current}
     out: dict[str, int] = {}
 
-    for m in cfg["milestones"]:
+    for m in selected:
         due_on = due_dates.get(m["key"])
         if m["title"] in by_title:
             out[m["key"]] = by_title[m["title"]]
@@ -462,10 +485,21 @@ def ensure_milestones(
     return out
 
 
-def ensure_labels(owner: str, repo: str, token: str, cfg: dict[str, Any], apply: bool) -> None:
+def ensure_labels(
+    owner: str,
+    repo: str,
+    token: str,
+    cfg: dict[str, Any],
+    apply: bool,
+    phase_keys: list[str] | None = None,
+) -> None:
+    names = phase_label_names(cfg, phase_keys)
+    selected = [
+        label for label in cfg["labels"] if names is None or label["name"] in names
+    ]
     url = f"{API}/repos/{owner}/{repo}/labels?per_page=100"
     if not apply:
-        print(f"[DRY-RUN] Consultaria labels: {url}")
+        print(f"[DRY-RUN] Consultaria labels: {url} ({len(selected)} a garantir)")
         return
 
     current = paginate_get(
@@ -473,7 +507,7 @@ def ensure_labels(owner: str, repo: str, token: str, cfg: dict[str, Any], apply:
     )
     existing = {label["name"] for label in current}
 
-    for label in cfg["labels"]:
+    for label in selected:
         if label["name"] in existing:
             print(f"[OK] Label ja existe: {label['name']}")
             continue
@@ -962,8 +996,10 @@ def main() -> int:
         if remote_errors:
             raise RuntimeError(format_validation_errors(remote_errors))
 
-    milestones = ensure_milestones(args.owner, args.repo, token, cfg, args.apply, due_dates)
-    ensure_labels(args.owner, args.repo, token, cfg, args.apply)
+    milestones = ensure_milestones(
+        args.owner, args.repo, token, cfg, args.apply, due_dates, phase_keys=args.phase
+    )
+    ensure_labels(args.owner, args.repo, token, cfg, args.apply, phase_keys=args.phase)
     issue_results = ensure_issues(
         args.owner,
         args.repo,

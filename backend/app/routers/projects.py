@@ -179,6 +179,7 @@ def create_project_endpoint(
         project_number=payload.project_number,
         project_start_date=payload.project_start_date,
         cfg=payload.config,
+        phase_keys=payload.phase_keys or None,
     )
 
     number = payload.project_number

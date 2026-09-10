@@ -13,7 +13,11 @@ from scripts import roadmap_builder as rb
 CFG = {
     "schedule": {"milestone_durations": {"M1": {"value": 5, "unit": "days"},
                                          "M2": {"value": 1, "unit": "months"}}},
-    "labels": [{"name": "fase:i", "color": "1D76DB", "description": "x"}],
+    "labels": [
+        {"name": "fase:i", "color": "1D76DB", "description": "x"},
+        {"name": "fase:ii", "color": "5319E7", "description": "x"},
+        {"name": "so-m2", "color": "000000", "description": "x"},
+    ],
     "milestones": [
         {"key": "M1", "title": "M1 - Exploração", "description": "d1"},
         {"key": "M2", "title": "M2 - Viabilidade", "description": "d2"},
@@ -21,7 +25,7 @@ CFG = {
     "issues": [
         {"title": "M1-a", "milestone": "M1", "labels": ["fase:i"]},
         {"title": "M1-b", "milestone": "M1", "labels": ["fase:i"]},
-        {"title": "M2-a", "milestone": "M2", "labels": ["fase:i"]},
+        {"title": "M2-a", "milestone": "M2", "labels": ["fase:ii", "so-m2"]},
     ],
 }
 
@@ -31,6 +35,29 @@ CFG = {
 def test_select_issues_filters_by_phase():
     assert [i["title"] for i in rb.select_issues(CFG, ["M1"])] == ["M1-a", "M1-b"]
     assert [i["title"] for i in rb.select_issues(CFG, None)] == ["M1-a", "M1-b", "M2-a"]
+
+
+def test_phase_label_names_filters():
+    assert rb.phase_label_names(CFG, None) is None
+    assert rb.phase_label_names(CFG, ["M1"]) == {"fase:i"}
+    assert rb.phase_label_names(CFG, ["M2"]) == {"fase:ii", "so-m2"}
+    assert rb.phase_label_names(CFG, ["M1", "M2"]) == {"fase:i", "fase:ii", "so-m2"}
+
+
+def test_ensure_milestones_dryrun_scopes_to_phase(capsys):
+    from datetime import date
+
+    due = {"M1": date(2026, 5, 15), "M2": date(2026, 6, 30)}
+    rb.ensure_milestones("o", "r", "t", CFG, False, due, phase_keys=["M2"])
+    out = capsys.readouterr().out
+    assert "Milestone M2 teria data alvo" in out
+    assert "Milestone M1 teria data alvo" not in out
+
+
+def test_ensure_labels_dryrun_scopes_to_phase(capsys):
+    rb.ensure_labels("o", "r", "t", CFG, False, phase_keys=["M1"])
+    out = capsys.readouterr().out
+    assert "(1 a garantir)" in out  # só fase:i
 
 
 def test_paginate_get_walks_pages(monkeypatch):
@@ -140,3 +167,24 @@ def test_apply_phase_endpoint_no_run_when_already_done(monkeypatch, auth_client,
     )
     auth_client.post(f"/api/projects/{project.id}/phases/M1/apply", json={})
     assert db.query(PhaseRun).count() == 0
+
+
+def test_create_project_forwards_phase_keys(monkeypatch, auth_client, db, user):
+    from backend.app.security import encrypt_pat as _enc
+
+    user.pat_encrypted = _enc("ghp_x")
+    db.commit()
+    captured = {}
+    monkeypatch.setattr(
+        "backend.app.routers.projects.build_roadmap",
+        lambda **k: captured.update(k)
+        or {"status": "success", "message": "ok", "issues_created": [], "project_node_id": None},
+    )
+    auth_client.post(
+        "/api/projects",
+        json={
+            "owner": "o", "repo": "r", "apply": True, "create_project": False,
+            "project_title": "T", "phase_keys": ["M1"], "config": {"issues": []},
+        },
+    )
+    assert captured["phase_keys"] == ["M1"]

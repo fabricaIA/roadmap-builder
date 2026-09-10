@@ -18,6 +18,8 @@ function ProjectWizard() {
   // F3: carregamento/erro do template.
   const [templateLoading, setTemplateLoading] = useState(true);
   const [templateError, setTemplateError] = useState("");
+  // Fases (milestone keys) a criar agora. Todas por padrão.
+  const [selectedPhases, setSelectedPhases] = useState([]);
 
   const [formData, setFormData] = useState({
     owner: "",
@@ -62,6 +64,7 @@ function ProjectWizard() {
       }));
 
       setTemplateError("");
+      setSelectedPhases(normalizedMilestones.map((m) => m.key));
       setFormData((prev) => ({
         ...prev,
         projectStartDate:
@@ -91,6 +94,36 @@ function ProjectWizard() {
     setTemplateError("");
     loadTemplate();
   };
+
+  const togglePhase = (key) => {
+    setSelectedPhases((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  };
+
+  // Só mostramos/criamos itens das fases selecionadas. Os índices reais são
+  // preservados porque os handlers editam o array completo em formData.
+  const phaseSet = new Set(selectedPhases);
+  const visibleMilestones = formData.milestones
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => phaseSet.has(m.key));
+  const visibleIssues = formData.issues
+    .map((iss, i) => ({ iss, i }))
+    .filter(({ iss }) => phaseSet.has(iss.milestone));
+  const usedLabelNames = new Set(
+    visibleIssues.flatMap(({ iss }) => iss.labels || []),
+  );
+  const visibleLabels = formData.labels
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => usedLabelNames.has(l.name));
+  const labelPhases = (name) =>
+    formData.milestones
+      .filter((m) =>
+        formData.issues.some(
+          (iss) => iss.milestone === m.key && (iss.labels || []).includes(name),
+        ),
+      )
+      .map((m) => m.key);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -219,7 +252,7 @@ function ProjectWizard() {
         ...formData.issues,
         {
           title: "[Atividade] Nova Atividade",
-          milestone: formData.milestones[0]?.key || "M1",
+          milestone: selectedPhases[0] || formData.milestones[0]?.key || "M1",
           labels: [],
           description: "",
           entregaveis: [""],
@@ -279,6 +312,13 @@ function ProjectWizard() {
         ? parseInt(formData.projectNumber, 10)
         : null,
       project_start_date: formData.projectStartDate,
+      // Só as fases marcadas são criadas agora; o config completo fica salvo
+      // no projeto para aplicar as demais fases depois (tela de detalhe).
+      phase_keys:
+        selectedPhases.length &&
+        selectedPhases.length < formData.milestones.length
+          ? selectedPhases
+          : null,
       config: {
         schedule: {
           project_start_date: formData.projectStartDate,
@@ -474,6 +514,40 @@ function ProjectWizard() {
                     existente em vez de criar um novo.
                   </small>
                 </div>
+
+                <fieldset className="phase-picker">
+                  <legend>Fases a criar agora</legend>
+                  <p
+                    style={{
+                      color: "#666",
+                      fontSize: "0.8rem",
+                      margin: "0 0 8px",
+                    }}
+                  >
+                    Marque só as fases que quer provisionar neste momento. As
+                    demais ficam guardadas e podem ser aplicadas depois na tela
+                    do projeto. Os passos seguintes mostram apenas os marcos,
+                    labels e issues das fases marcadas.
+                  </p>
+                  {formData.milestones.map((m) => (
+                    <label key={m.key} className="phase-check">
+                      <input
+                        type="checkbox"
+                        checked={selectedPhases.includes(m.key)}
+                        onChange={() => togglePhase(m.key)}
+                      />{" "}
+                      {m.title || m.key}
+                    </label>
+                  ))}
+                  {selectedPhases.length === 0 && (
+                    <div
+                      className="message error"
+                      style={{ marginTop: 8, fontSize: "0.85rem" }}
+                    >
+                      Selecione ao menos uma fase.
+                    </div>
+                  )}
+                </fieldset>
               </div>
             )}
 
@@ -492,7 +566,7 @@ function ProjectWizard() {
                   Defina o identificador e o tempo de duração de cada marco para
                   o cálculo automático do cronograma.
                 </p>
-                {formData.milestones.map((m, index) => (
+                {visibleMilestones.map(({ m, i: index }) => (
                   <div key={index} className="dynamic-row">
                     <input
                       type="text"
@@ -560,9 +634,10 @@ function ProjectWizard() {
                   }}
                 >
                   Configure o nome, a cor de identificação e a descrição de cada
-                  label.
+                  label. Mostrando apenas as labels usadas pelas fases
+                  selecionadas.
                 </p>
-                {formData.labels.map((l, index) => (
+                {visibleLabels.map(({ l, i: index }) => (
                   <div key={index} className="label-row">
                     <input
                       type="text"
@@ -573,6 +648,12 @@ function ProjectWizard() {
                       placeholder="Ex: fase:i"
                       className="label-name-input"
                     />
+                    <span
+                      className="phase-badge partial"
+                      title="Fases que usam"
+                    >
+                      {labelPhases(l.name).join(", ") || "—"}
+                    </span>
                     <div className="color-picker-wrapper">
                       <input
                         type="color"
@@ -641,7 +722,7 @@ function ProjectWizard() {
                   Defina os detalhes de título e descrição de cada marco do
                   roadmap.
                 </p>
-                {formData.milestones.map((m, index) => (
+                {visibleMilestones.map(({ m, i: index }) => (
                   <div key={index} className="milestone-card">
                     <div className="milestone-top-row">
                       <input
@@ -721,9 +802,15 @@ function ProjectWizard() {
                 </p>
 
                 <div className="issues-scroll-container">
-                  {formData.issues.map((iss, issIndex) => (
+                  {visibleIssues.map(({ iss, i: issIndex }) => (
                     <div key={issIndex} className="issue-card-box">
                       <div className="issue-top-row">
+                        <span
+                          className="phase-badge created"
+                          title="Fase (milestone) desta issue"
+                        >
+                          {iss.milestone}
+                        </span>
                         <input
                           type="text"
                           value={iss.title}
@@ -926,14 +1013,20 @@ function ProjectWizard() {
                         : "Nenhum projeto vinculado"}
                   </p>
                   <p>
-                    <strong>Total de Milestones:</strong>{" "}
+                    <strong>Fases a criar agora:</strong>{" "}
+                    {selectedPhases.length === formData.milestones.length
+                      ? "todas"
+                      : selectedPhases.join(", ") || "nenhuma"}
+                  </p>
+                  <p>
+                    <strong>Marcos:</strong> {visibleMilestones.length} de{" "}
                     {formData.milestones.length}
                   </p>
                   <p>
-                    <strong>Total de Labels:</strong> {formData.labels.length}
+                    <strong>Labels:</strong> {visibleLabels.length}
                   </p>
                   <p>
-                    <strong>Total de Issues:</strong> {formData.issues.length}
+                    <strong>Issues a criar:</strong> {visibleIssues.length}
                   </p>
                 </div>
 
@@ -1027,6 +1120,7 @@ function ProjectWizard() {
                   type="button"
                   onClick={nextStep}
                   className="btn-primary"
+                  disabled={step === 1 && selectedPhases.length === 0}
                 >
                   Próximo
                 </button>
@@ -1035,7 +1129,9 @@ function ProjectWizard() {
                 <div style={{ textAlign: "right" }}>
                   <button
                     onClick={handleSubmit}
-                    disabled={loading || !user?.has_pat}
+                    disabled={
+                      loading || !user?.has_pat || selectedPhases.length === 0
+                    }
                     className="btn-success"
                   >
                     {loading

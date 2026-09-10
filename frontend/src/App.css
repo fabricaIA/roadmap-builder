@@ -880,3 +880,41 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 .issue-table a:hover {
   text-decoration: underline;
 }
+
+/* --- Seletor de fases no wizard --- */
+.phase-picker {
+  margin-top: 16px;
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.phase-picker legend {
+  font-weight: 700;
+  color: #1f2d3d;
+  padding: 0 6px;
+}
+
+.phase-check {
+  display: block;
+  font-size: 0.9rem;
+  margin: 4px 0;
+  cursor: pointer;
+}
+
+.label-row .phase-badge {
+  white-space: nowrap;
+}
+
+.issue-top-row .phase-badge {
+  align-self: center;
+}
+
+/* link estilizado como botão */
+a.btn-primary,
+a.btn-secondary,
+a.btn-success {
+  display: inline-block;
+  text-decoration: none;
+  line-height: normal;
+}
