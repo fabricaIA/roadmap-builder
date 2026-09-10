@@ -3,6 +3,7 @@ import { useAuth } from "./auth/useAuth";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
+import ProjectDetail from "./pages/ProjectDetail";
 import ProjectWizard from "./pages/ProjectWizard";
 import "./App.css";
 
@@ -67,6 +68,14 @@ export default function App() {
           element={
             <RequireAuth>
               <ProjectWizard />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/projects/:id"
+          element={
+            <RequireAuth>
+              <ProjectDetail />
             </RequireAuth>
           }
         />

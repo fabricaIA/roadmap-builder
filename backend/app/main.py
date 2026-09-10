@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.config import get_settings
-from backend.app.routers import auth, profile, roadmap
+from backend.app.routers import auth, profile, projects, roadmap
 
 logging.basicConfig(level=logging.INFO)
 settings = get_settings()
@@ -29,6 +29,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(profile.router)
+app.include_router(projects.router)
 app.include_router(roadmap.router)
 
 

@@ -641,3 +641,142 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 .home-actions a {
   text-decoration: none;
 }
+
+/* --- Home / lista de projetos (PR2) --- */
+.home-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.project-card {
+  display: block;
+  padding: 16px;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+  background: #fff;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+
+.project-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.project-card-title {
+  font-weight: 700;
+  color: #1f2d3d;
+  margin-bottom: 4px;
+}
+
+.project-card-repo {
+  font-size: 0.82rem;
+  color: #6b7684;
+  margin-bottom: 10px;
+}
+
+.project-card-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: #4a5568;
+  flex-wrap: wrap;
+}
+
+.project-card-stats.muted {
+  color: #b0392a;
+}
+
+.import-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 12px;
+  background: #f4f6f8;
+  border-radius: 8px;
+}
+
+.import-form input {
+  padding: 6px 10px;
+  border: 1px solid #cfd6dd;
+  border-radius: 6px;
+}
+
+.import-err {
+  color: #b0392a;
+  font-size: 0.82rem;
+}
+
+/* --- Detalhe do projeto (PR2) --- */
+.stat-row {
+  display: flex;
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat-num {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #1f2d3d;
+}
+
+.stat-label {
+  font-size: 0.78rem;
+  color: #6b7684;
+}
+
+.phase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.phase-row {
+  display: grid;
+  grid-template-columns: 220px 1fr 120px;
+  align-items: center;
+  gap: 12px;
+}
+
+.phase-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.phase-bar {
+  height: 10px;
+  background: #e9edf1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.phase-bar-fill {
+  height: 100%;
+  background: #2f9e44;
+}
+
+.phase-counts {
+  font-size: 0.8rem;
+  color: #6b7684;
+  text-align: right;
+}

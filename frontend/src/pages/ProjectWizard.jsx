@@ -295,7 +295,8 @@ function ProjectWizard() {
     };
 
     try {
-      const data = await apiFetch("/api/build-roadmap", {
+      // PR2: cria/registra o projeto (o backend também insere a linha Project).
+      const data = await apiFetch("/api/projects", {
         method: "POST",
         body: payload,
       });
@@ -312,6 +313,10 @@ function ProjectWizard() {
         setMessage(
           `Sucesso! Roadmap aplicado com ${issuesCount || formData.issues.length} issue(s).`,
         );
+      }
+      // Vai para o detalhe do projeto recém-registrado.
+      if (data.project?.id) {
+        setTimeout(() => navigate(`/projects/${data.project.id}`), 900);
       }
     } catch (error) {
       setMessage(`Erro: ${error.message}`);

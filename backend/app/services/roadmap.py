@@ -127,15 +127,16 @@ def build_roadmap(
         )
 
     # Painel de projeto — falha aqui não invalida o que já foi criado.
+    project_node_id: str | None = None
     if wants_project and apply:
         try:
             if create_project_flag:
-                project_id = create_project(owner, repo, token, project_title)
+                project_node_id = create_project(owner, repo, token, project_title)
             else:
-                project_id = get_project_id(owner, token, project_number)
-                link_project_to_repository(owner, repo, token, project_id)
+                project_node_id = get_project_id(owner, token, project_number)
+                link_project_to_repository(owner, repo, token, project_node_id)
             add_issues_to_project(
-                owner, repo, token, project_id, cfg, titles, apply, issue_schedule
+                owner, repo, token, project_node_id, cfg, titles, apply, issue_schedule
             )
         except Exception as exc:
             logger.exception("Falha na etapa do painel de projeto.")
@@ -147,10 +148,12 @@ def build_roadmap(
                 ),
                 "issues_created": titles,
                 "project_error": humanize_error(str(exc)),
+                "project_node_id": project_node_id,
             }
 
     return {
         "status": "success",
         "message": "Roadmap processado com sucesso!",
         "issues_created": titles,
+        "project_node_id": project_node_id,
     }

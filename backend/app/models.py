@@ -1,14 +1,14 @@
 """Modelos ORM.
 
-PR1 introduz apenas `User`. `Project`, `Organization`, `OrgMembership` e
-`PhaseRun` entram nos PRs seguintes (ver plano).
+PR1: `User`. PR2: `Project`. `Organization`, `OrgMembership` e `PhaseRun`
+entram nos PRs seguintes (ver plano).
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db import Base
@@ -37,5 +37,36 @@ class User(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_login_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+
+class Project(Base):
+    """Registro de um roadmap gerenciado pelo app (criado ou importado).
+
+    É a fonte de verdade da lista pós-login e dos dashboards; os números
+    (contagens de issues, progresso por fase) são buscados live no GitHub.
+    """
+
+    __tablename__ = "projects"
+    __table_args__ = (
+        UniqueConstraint("created_by_user_id", "owner", "repo", name="uq_project_user_repo"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), index=True
+    )
+    owner: Mapped[str] = mapped_column(String(255), index=True)
+    repo: Mapped[str] = mapped_column(String(255))
+    title: Mapped[str] = mapped_column(String(512), default="")
+    project_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    project_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # "created" (feito pelo wizard) ou "imported".
+    source: Mapped[str] = mapped_column(String(16), default="created")
+    # Preenchido no PR4 (multi-tenant); nulo = conta pessoal.
+    org_login: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
