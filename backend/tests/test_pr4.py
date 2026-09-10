@@ -78,24 +78,24 @@ def admin(db, user, org):
 
 def test_user_orgs_and_membership(db, user, org, member):
     orgs = user_orgs(db, user)
-    assert orgs == [
-        {
-            "login": "acme",
-            "name": "ACME",
-            "avatar_url": None,
-            "role": "member",
-            "is_coordinator": False,
-        }
-    ]
+    # 1º item é o tenant pessoal (conta do próprio usuário)
+    assert orgs[0]["login"] == user.login and orgs[0]["personal"] is True
+    acme = next(o for o in orgs if o["login"] == "acme")
+    assert acme["role"] == "member" and acme["is_coordinator"] is False
     assert membership(db, user, "acme").role == "member"
     assert membership(db, user, "outra") is None
+    # membership do tenant pessoal = admin (coordenador da própria conta)
+    assert membership(db, user, user.login).role == "admin"
 
 
 # --- routers ---
 
 def test_list_orgs(auth_client, member):
     body = auth_client.get("/api/orgs").json()
-    assert body[0]["login"] == "acme" and body[0]["role"] == "member"
+    logins = [o["login"] for o in body]
+    assert "octocat" in logins  # tenant pessoal (user fixture)
+    acme = next(o for o in body if o["login"] == "acme")
+    assert acme["role"] == "member"
 
 
 def test_dashboard_requires_membership(auth_client, org):
@@ -109,8 +109,9 @@ def test_my_issues_for_member(monkeypatch, auth_client, db, user, org, member):
     db.commit()
     monkeypatch.setattr(
         "backend.app.routers.dashboards.collect_issues",
-        lambda tok, repos: (
-            [{**i, "phase": dash.phase_of(i)} for i in ISSUES],
+        lambda tok, projects: (
+            [{**i, "phase": dash.phase_of(i), "status": None} for i in ISSUES],
+            [],
             [],
         ),
     )
@@ -128,8 +129,9 @@ def test_devs_requires_coordinator(monkeypatch, auth_client, member):
 def test_devs_for_coordinator(monkeypatch, auth_client, admin):
     monkeypatch.setattr(
         "backend.app.routers.dashboards.collect_issues",
-        lambda tok, repos: (
-            [{**i, "phase": dash.phase_of(i)} for i in ISSUES],
+        lambda tok, projects: (
+            [{**i, "phase": dash.phase_of(i), "status": None} for i in ISSUES],
+            [],
             [],
         ),
     )
@@ -147,8 +149,9 @@ def test_project_issues_endpoint(monkeypatch, auth_client, db, user):
     db.refresh(p)
     monkeypatch.setattr(
         "backend.app.routers.projects.collect_issues",
-        lambda tok, repos: (
-            [{**i, "phase": dash.phase_of(i), "repo": "acme/r1"} for i in ISSUES],
+        lambda tok, projects: (
+            [{**i, "phase": dash.phase_of(i), "repo": "acme/r1", "status": None} for i in ISSUES],
+            [],
             [],
         ),
     )

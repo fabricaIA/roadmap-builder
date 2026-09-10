@@ -53,6 +53,7 @@ export default function Board() {
           issues={data.issues}
           errors={data.errors}
           repos={data.repos}
+          statusOrder={data.status_order || []}
           loading={loading}
           onRefresh={load}
         />

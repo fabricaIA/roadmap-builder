@@ -82,19 +82,34 @@ def user_orgs(db: Session, user: User) -> list[dict]:
         .where(OrgMembership.user_id == user.id)
         .order_by(Organization.login)
     ).all()
-    return [
+    orgs = [
         {
             "login": org.login,
             "name": org.name,
             "avatar_url": org.avatar_url,
             "role": m.role,
             "is_coordinator": m.role == "admin",
+            "personal": False,
         }
         for m, org in rows
     ]
+    # "Tenant pessoal": permite ao usuário ver seus projetos de conta pessoal
+    # de forma consolidada, sem depender de uma organização do GitHub.
+    personal = {
+        "login": user.login,
+        "name": (user.name or user.login) + " (conta pessoal)",
+        "avatar_url": user.avatar_url,
+        "role": "admin",
+        "is_coordinator": True,
+        "personal": True,
+    }
+    return [personal, *orgs]
 
 
-def membership(db: Session, user: User, org_login: str) -> OrgMembership | None:
+def membership(db: Session, user: User, org_login: str):
+    if org_login == user.login:
+        # tenant pessoal — coordenador da própria conta
+        return OrgMembership(user_id=user.id, org_id=0, role="admin")
     return db.execute(
         select(OrgMembership)
         .join(Organization, OrgMembership.org_id == Organization.id)

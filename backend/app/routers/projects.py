@@ -217,8 +217,16 @@ def get_project_issues(
     """Issues live do repositório do projeto, no mesmo formato dos dashboards
     (para o Board por projeto)."""
     p = _project_or_404(db, user, project_id)
-    issues, errors = collect_issues(_pat(user), [(p.owner, p.repo)])
-    return {"issues": issues, "errors": errors, "repos": 1}
+    issues, errors, status_order = collect_issues(
+        _pat(user),
+        [{"owner": p.owner, "repo": p.repo, "project_number": p.project_number}],
+    )
+    return {
+        "issues": issues,
+        "errors": errors,
+        "repos": 1,
+        "status_order": status_order,
+    }
 
 
 @router.get("/{project_id}/phases")

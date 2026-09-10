@@ -26,11 +26,22 @@ def _pat(user: User) -> str:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def _org_repos(db: Session, org_login: str) -> list[tuple[str, str]]:
+def _org_projects(db: Session, org_login: str) -> list[dict]:
+    """Projetos (owner/repo/nº do Project) daquele tenant, de qualquer usuário."""
     rows = db.execute(
-        select(Project.owner, Project.repo).where(Project.owner == org_login)
+        select(Project.owner, Project.repo, Project.project_number).where(
+            (Project.org_login == org_login) | (Project.owner == org_login)
+        )
     ).all()
-    return sorted({(o, r) for o, r in rows})
+    dedup: dict[tuple[str, str], int | None] = {}
+    for o, r, n in rows:
+        dedup.setdefault((o, r), n)
+        if n and not dedup[(o, r)]:
+            dedup[(o, r)] = n
+    return [
+        {"owner": o, "repo": r, "project_number": n}
+        for (o, r), n in sorted(dedup.items())
+    ]
 
 
 @router.get("/my-issues")
@@ -40,10 +51,16 @@ def my_issues(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    repos = _org_repos(db, org)
-    issues, errors = collect_issues(_pat(user), repos)
+    projects = _org_projects(db, org)
+    issues, errors, status_order = collect_issues(_pat(user), projects)
     mine = filter_mine(issues, user.login)
-    return {"issues": mine, "agg": aggregate(mine), "errors": errors, "repos": len(repos)}
+    return {
+        "issues": mine,
+        "agg": aggregate(mine),
+        "errors": errors,
+        "repos": len(projects),
+        "status_order": status_order,
+    }
 
 
 @router.get("/org-issues")
@@ -53,9 +70,15 @@ def org_issues(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    repos = _org_repos(db, org)
-    issues, errors = collect_issues(_pat(user), repos)
-    return {"issues": issues, "agg": aggregate(issues), "errors": errors, "repos": len(repos)}
+    projects = _org_projects(db, org)
+    issues, errors, status_order = collect_issues(_pat(user), projects)
+    return {
+        "issues": issues,
+        "agg": aggregate(issues),
+        "errors": errors,
+        "repos": len(projects),
+        "status_order": status_order,
+    }
 
 
 @router.get("/devs")
@@ -65,8 +88,8 @@ def devs(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    repos = _org_repos(db, org)
-    issues, errors = collect_issues(_pat(user), repos)
+    projects = _org_projects(db, org)
+    issues, errors, _status_order = collect_issues(_pat(user), projects)
 
     per_dev: dict[str, dict] = {}
     for i in issues:
@@ -83,5 +106,5 @@ def devs(
     return {
         "devs": sorted(per_dev.values(), key=lambda r: r["dev"] or ""),
         "errors": errors,
-        "repos": len(repos),
+        "repos": len(projects),
     }

@@ -35,6 +35,67 @@ query($owner: String!, $repo: String!, $after: String) {
 }
 """
 
+# Status (campo single-select "Status") de um Project V2 vinculado ao repo.
+_STATUS_QUERY = """
+query($owner: String!, $repo: String!, $number: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    projectV2(number: $number) {
+      field(name: "Status") {
+        ... on ProjectV2SingleSelectField { options { name } }
+      }
+      items(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          content { ... on Issue { url } ... on PullRequest { url } }
+          status: fieldValueByName(name: "Status") {
+            ... on ProjectV2ItemFieldSingleSelectValue { name }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def _project_status(
+    token: str, owner: str, repo: str, number: int
+) -> tuple[dict[str, str], list[str]]:
+    """Retorna ({url_da_issue: status}, ordem_das_colunas_de_status)."""
+    key = f"status:{owner}/{repo}#{number}"
+    hit = _cache.get(key)
+    if hit and (time.monotonic() - hit[0]) < _CACHE_TTL:
+        return hit[1]
+
+    mapping: dict[str, str] = {}
+    order: list[str] = []
+    after = None
+    for _ in range(_MAX_PAGES):
+        data = graphql(
+            token,
+            _STATUS_QUERY,
+            {"owner": owner, "repo": repo, "number": number, "after": after},
+        )
+        proj = (data.get("repository") or {}).get("projectV2")
+        if not proj:
+            break
+        if not order:
+            field = proj.get("field") or {}
+            order = [o["name"] for o in field.get("options", [])]
+        conn = proj["items"]
+        for node in conn["nodes"]:
+            url = (node.get("content") or {}).get("url")
+            st = (node.get("status") or {}).get("name")
+            if url and st:
+                mapping[url] = st
+        if not conn["pageInfo"]["hasNextPage"]:
+            break
+        after = conn["pageInfo"]["endCursor"]
+
+    result = (mapping, order)
+    _cache[key] = (time.monotonic(), result)
+    return result
+
 
 def phase_of(issue: dict) -> str:
     m = issue.get("milestone")
@@ -87,23 +148,62 @@ def _repo_issues(token: str, owner: str, repo: str) -> list[dict]:
     return issues
 
 
+def _normalize_projects(projects) -> list[dict]:
+    """Aceita [(owner, repo)] ou [{owner, repo, project_number}]."""
+    out = []
+    for p in projects:
+        if isinstance(p, dict):
+            out.append(
+                {
+                    "owner": p["owner"],
+                    "repo": p["repo"],
+                    "project_number": p.get("project_number"),
+                }
+            )
+        else:
+            out.append({"owner": p[0], "repo": p[1], "project_number": None})
+    return out
+
+
 def collect_issues(
-    token: str, repos: list[tuple[str, str]]
-) -> tuple[list[dict], list[str]]:
+    token: str, projects
+) -> tuple[list[dict], list[str], list[str]]:
+    """Devolve (issues, erros, ordem_das_colunas_de_status).
+
+    Cada issue ganha `phase` e, quando o projeto tem um Project V2 vinculado,
+    `status` (o valor do campo "Status" no board do GitHub).
+    """
     seen: set[str] = set()
     out: list[dict] = []
     errors: list[str] = []
-    for owner, repo in repos:
+    status_order: list[str] = []
+
+    for p in _normalize_projects(projects):
+        owner, repo, number = p["owner"], p["repo"], p["project_number"]
+        status_map: dict[str, str] = {}
+        if number:
+            try:
+                status_map, order = _project_status(token, owner, repo, number)
+                for name in order:
+                    if name not in status_order:
+                        status_order.append(name)
+            except Exception:  # noqa: BLE001 — status é opcional
+                pass
         try:
             for issue in _repo_issues(token, owner, repo):
                 if issue["url"] in seen:
                     continue
                 seen.add(issue["url"])
-                issue = {**issue, "phase": phase_of(issue)}
-                out.append(issue)
+                out.append(
+                    {
+                        **issue,
+                        "phase": phase_of(issue),
+                        "status": status_map.get(issue["url"]),
+                    }
+                )
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{owner}/{repo}: {humanize_error(str(exc))}")
-    return out, errors
+    return out, errors, status_order
 
 
 def filter_mine(issues: list[dict], login: str) -> list[dict]:

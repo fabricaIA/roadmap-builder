@@ -107,7 +107,12 @@ export default function Manual() {
           <code> admin</code> → <strong>coordenador</strong>,{" "}
           <code>member</code> → <strong>dev</strong>.
         </li>
-        <li>Escolha a organização no seletor do cabeçalho.</li>
+        <li>
+          Há também um <strong>tenant pessoal</strong> (sua conta) no seletor —
+          consolida os projetos de repositórios pessoais, sem depender de uma
+          organização.
+        </li>
+        <li>Escolha o tenant no seletor do cabeçalho.</li>
       </ul>
 
       <h2>6. Dashboards</h2>
@@ -121,11 +126,13 @@ export default function Manual() {
           da org. Coordenador vê também o recorte por desenvolvedor.
         </li>
         <li>
-          <strong>Board</strong> — colunas com as issues que existem no GitHub
-          (a visão de gestão de um board), agrupáveis por fase, estado ou
-          responsável, com filtro por repositório/responsável. Cada card abre a
-          issue no GitHub. Há o Board da organização (menu) e o Board de um
-          projeto específico (aba "Board" na tela do projeto).
+          <strong>Board</strong> — colunas com as issues que existem no GitHub.
+          Agrupa por <strong>Status</strong> (o campo Status do Project V2,
+          mesma representação do GitHub; sem Project vinculado, cai em
+          aberta/fechada), Fase/Milestone, Responsável ou Aberta/Fechada.
+          Filtros: repositório, milestone, responsável (assign to), label e
+          estado. Cada card abre a issue no GitHub. Há o Board da organização
+          (menu) e o Board de um projeto (aba "Board" na tela do projeto).
         </li>
         <li>
           <strong>Devs</strong> (coordenador) — matriz de progresso por

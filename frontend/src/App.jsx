@@ -29,11 +29,12 @@ function OrgSwitcher() {
       className="org-switcher"
       value={current?.login || ""}
       onChange={(e) => setCurrent(e.target.value)}
+      title="Organização (tenant). O primeiro item é sua conta pessoal."
     >
       {orgs.map((o) => (
         <option key={o.login} value={o.login}>
           {o.login}
-          {o.is_coordinator ? " (coord.)" : ""}
+          {o.personal ? " (pessoal)" : o.is_coordinator ? " (coord.)" : ""}
         </option>
       ))}
     </select>

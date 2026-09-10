@@ -179,6 +179,7 @@ export default function ProjectDetail() {
             <BoardView
               issues={board.issues}
               errors={board.errors}
+              statusOrder={board.status_order || []}
               showRepoFilter={false}
               loading={boardLoading}
               onRefresh={loadBoard}

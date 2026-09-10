@@ -2,12 +2,39 @@ import { useMemo, useState } from "react";
 import { DashboardErrors } from "./parts";
 
 const GROUPS = [
-  ["phase", "Fase"],
-  ["state", "Estado"],
+  ["status", "Status"],
+  ["phase", "Fase / Milestone"],
   ["assignee", "Responsável"],
+  ["state", "Aberta / Fechada"],
 ];
+
 const STATE_ORDER = ["OPEN", "CLOSED"];
 const STATE_LABEL = { OPEN: "Abertas", CLOSED: "Fechadas" };
+const FALLBACK_OPEN = "◻ Abertas (sem status)";
+const FALLBACK_CLOSED = "✓ Fechadas";
+const NO_STATUS = "Sem status";
+
+function statusKeyOf(i) {
+  if (i.status) return i.status;
+  return i.state === "CLOSED" ? FALLBACK_CLOSED : FALLBACK_OPEN;
+}
+
+function FilterSelect({ value, onChange, title, allLabel, options }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      title={title}
+    >
+      <option value="">{allLabel}</option>
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 function IssueCard({ i }) {
   return (
@@ -24,6 +51,7 @@ function IssueCard({ i }) {
       <div className="board-card-meta">
         <span className="board-card-repo">{i.repo.split("/")[1]}</span>
         {i.milestone && <span className="phase-badge partial">{i.phase}</span>}
+        {i.status && <span className="phase-badge created">{i.status}</span>}
         <span
           className={`phase-badge ${i.state === "OPEN" ? "not_created" : "created"}`}
         >
@@ -49,38 +77,55 @@ function IssueCard({ i }) {
 }
 
 /**
- * Board reutilizável. `issues` no formato dos dashboards.
- * `onRefresh` opcional mostra o botão "Atualizar".
+ * Board reutilizável. `issues` no formato dos dashboards; `statusOrder` é a
+ * ordem das colunas de Status vinda do(s) Project(s) V2 do GitHub.
  */
 export default function BoardView({
   issues = [],
   errors = [],
   repos = 0,
+  statusOrder = [],
   showRepoFilter = true,
   loading = false,
   onRefresh,
 }) {
-  const [groupBy, setGroupBy] = useState("phase");
+  const hasStatus = statusOrder.length > 0 || issues.some((i) => i.status);
+  const [groupBy, setGroupBy] = useState(hasStatus ? "status" : "phase");
   const [repoFilter, setRepoFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [milestoneFilter, setMilestoneFilter] = useState("");
+  const [labelFilter, setLabelFilter] = useState("");
+  const [stateFilter, setStateFilter] = useState("");
 
-  const repoOptions = useMemo(
-    () => [...new Set(issues.map((i) => i.repo))].sort(),
-    [issues],
-  );
-  const assigneeOptions = useMemo(
-    () => [...new Set(issues.flatMap((i) => i.assignees || []))].sort(),
-    [issues],
-  );
+  const opts = useMemo(() => {
+    const uniq = (arr) => [...new Set(arr.filter(Boolean))].sort();
+    return {
+      repos: uniq(issues.map((i) => i.repo)),
+      assignees: uniq(issues.flatMap((i) => i.assignees || [])),
+      milestones: uniq(issues.map((i) => i.milestone)),
+      labels: uniq(issues.flatMap((i) => i.labels || [])),
+    };
+  }, [issues]);
 
   const filtered = useMemo(
     () =>
       issues.filter(
         (i) =>
           (!showRepoFilter || !repoFilter || i.repo === repoFilter) &&
-          (!assigneeFilter || (i.assignees || []).includes(assigneeFilter)),
+          (!assigneeFilter || (i.assignees || []).includes(assigneeFilter)) &&
+          (!milestoneFilter || i.milestone === milestoneFilter) &&
+          (!labelFilter || (i.labels || []).includes(labelFilter)) &&
+          (!stateFilter || i.state === stateFilter),
       ),
-    [issues, repoFilter, assigneeFilter, showRepoFilter],
+    [
+      issues,
+      showRepoFilter,
+      repoFilter,
+      assigneeFilter,
+      milestoneFilter,
+      labelFilter,
+      stateFilter,
+    ],
   );
 
   const columns = useMemo(() => {
@@ -107,6 +152,28 @@ export default function BoardView({
       return [...map.values()].sort((a, b) => a.title.localeCompare(b.title));
     }
 
+    if (groupBy === "status") {
+      // colunas na ordem do Project V2, depois buckets de fallback
+      for (const name of statusOrder)
+        map.set(name, { key: name, title: name, issues: [] });
+      filtered.forEach((i) => {
+        const k = statusKeyOf(i);
+        push(k, k, i);
+      });
+      const rank = (k) => {
+        const idx = statusOrder.indexOf(k);
+        if (idx >= 0) return idx;
+        if (k === FALLBACK_OPEN) return 900;
+        if (k === FALLBACK_CLOSED) return 901;
+        if (k === NO_STATUS) return 999;
+        return 800;
+      };
+      return [...map.values()]
+        .filter((c) => c.issues.length || statusOrder.includes(c.key))
+        .sort((a, b) => rank(a.key) - rank(b.key));
+    }
+
+    // fase / milestone
     filtered.forEach((i) => push(i.phase, i.phase, i));
     return [...map.values()].sort((a, b) => {
       const ma = /^M(\d+)$/.exec(a.key);
@@ -118,7 +185,7 @@ export default function BoardView({
       if (b.key === "sem fase") return -1;
       return a.key.localeCompare(b.key);
     });
-  }, [filtered, groupBy]);
+  }, [filtered, groupBy, statusOrder]);
 
   return (
     <div>
@@ -134,30 +201,43 @@ export default function BoardView({
           </select>
         </label>
         {showRepoFilter && (
-          <select
+          <FilterSelect
             value={repoFilter}
-            onChange={(e) => setRepoFilter(e.target.value)}
+            onChange={setRepoFilter}
             title="Filtrar por repositório"
-          >
-            <option value="">Todos os repositórios</option>
-            {repoOptions.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+            allLabel="Todos os repositórios"
+            options={opts.repos}
+          />
         )}
-        <select
+        <FilterSelect
+          value={milestoneFilter}
+          onChange={setMilestoneFilter}
+          title="Filtrar por milestone"
+          allLabel="Todos os milestones"
+          options={opts.milestones}
+        />
+        <FilterSelect
           value={assigneeFilter}
-          onChange={(e) => setAssigneeFilter(e.target.value)}
-          title="Filtrar por responsável"
+          onChange={setAssigneeFilter}
+          title="Filtrar por responsável (assign to)"
+          allLabel="Todos os responsáveis"
+          options={opts.assignees.map((a) => a)}
+        />
+        <FilterSelect
+          value={labelFilter}
+          onChange={setLabelFilter}
+          title="Filtrar por label"
+          allLabel="Todas as labels"
+          options={opts.labels}
+        />
+        <select
+          value={stateFilter}
+          onChange={(e) => setStateFilter(e.target.value)}
+          title="Filtrar por estado"
         >
-          <option value="">Todos os responsáveis</option>
-          {assigneeOptions.map((a) => (
-            <option key={a} value={a}>
-              @{a}
-            </option>
-          ))}
+          <option value="">Abertas e fechadas</option>
+          <option value="OPEN">Só abertas</option>
+          <option value="CLOSED">Só fechadas</option>
         </select>
         {onRefresh && (
           <button
@@ -173,7 +253,11 @@ export default function BoardView({
 
       <p className="subtitle" style={{ color: "#666" }}>
         {filtered.length} issue(s)
-        {repos ? ` · ${repos} projeto(s)` : ""} · dados ao vivo do GitHub
+        {repos ? ` · ${repos} projeto(s)` : ""}
+        {groupBy === "status" && !hasStatus
+          ? " · nenhum Project V2 vinculado — status = aberta/fechada"
+          : ""}{" "}
+        · dados ao vivo do GitHub
       </p>
 
       <div className="board">
