@@ -839,3 +839,44 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
 .history-list li {
   margin: 4px 0;
 }
+
+/* --- Dashboards / org (PR4) --- */
+.org-switcher {
+  padding: 4px 8px;
+  border: 1px solid #cfd6dd;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  background: #fff;
+}
+
+.issue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.issue-table th,
+.issue-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eceef1;
+  vertical-align: top;
+}
+
+.issue-table th {
+  color: #6b7684;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.issue-table a {
+  color: #1f6feb;
+  text-decoration: none;
+}
+
+.issue-table a:hover {
+  text-decoration: underline;
+}

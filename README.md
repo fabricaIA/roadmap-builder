@@ -33,6 +33,19 @@ cd frontend && npm install && npm run dev
 Abra `http://localhost:5173`, entre com o GitHub, configure o PAT no perfil
 (`repo` + `project`) e crie o roadmap pelo wizard.
 
+### Multi-tenant e dashboards
+
+O tenant é a **organização do GitHub**: no login (escopo `read:org`) o app
+sincroniza suas orgs e o papel (`admin` → coordenador, `member` → dev).
+Selecione a org no cabeçalho. Cada usuário vê:
+
+- **Minhas issues** — issues (autor/assignee) nos projetos de roadmap da org.
+- **Issues da organização** — todas as issues dos projetos da org.
+- **Devs** (só coordenador) — progresso por desenvolvedor e por fase.
+
+Os números são buscados live no GitHub (cache de 60s). Se o PAT não tiver
+`read:org`, sincronize manualmente pelo perfil.
+
 Testes do backend: `pytest`.
 
 ## Automação por linha de comando (CLI)

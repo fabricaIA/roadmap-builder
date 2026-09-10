@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     github_oauth_client_id: str = ""
     github_oauth_client_secret: str = ""
     oauth_redirect_uri: str = "http://localhost:8000/api/auth/github/callback"
-    # Escopos pedidos no login. Identidade só; org/role entram num PR posterior.
-    oauth_scopes: str = "read:user user:email"
+    # Escopos pedidos no login: identidade + leitura de orgs/roles (multi-tenant).
+    oauth_scopes: str = "read:user user:email read:org"
 
     # --- Sessão / segredos ---
     # JWT HS256 que assina o cookie de sessão.

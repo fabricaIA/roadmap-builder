@@ -1,10 +1,14 @@
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/useAuth";
+import { useOrg } from "./org/useOrg";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Profile from "./pages/Profile";
 import ProjectDetail from "./pages/ProjectDetail";
 import ProjectWizard from "./pages/ProjectWizard";
+import Devs from "./pages/dashboards/Devs";
+import MyIssues from "./pages/dashboards/MyIssues";
+import OrgIssues from "./pages/dashboards/OrgIssues";
 import "./App.css";
 
 function RequireAuth({ children }) {
@@ -15,8 +19,28 @@ function RequireAuth({ children }) {
   return children;
 }
 
+function OrgSwitcher() {
+  const { orgs, current, setCurrent } = useOrg();
+  if (!orgs.length) return null;
+  return (
+    <select
+      className="org-switcher"
+      value={current?.login || ""}
+      onChange={(e) => setCurrent(e.target.value)}
+    >
+      {orgs.map((o) => (
+        <option key={o.login} value={o.login}>
+          {o.login}
+          {o.is_coordinator ? " (coord.)" : ""}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function Header() {
   const { user, logout } = useAuth();
+  const { current, isCoordinator } = useOrg();
   if (!user) return null;
   return (
     <header className="app-header">
@@ -26,9 +50,13 @@ function Header() {
       <nav className="app-nav">
         <Link to="/">Projetos</Link>
         <Link to="/projects/new">Novo</Link>
+        {current && <Link to="/dashboards/my">Minhas issues</Link>}
+        {current && <Link to="/dashboards/org">Issues da org</Link>}
+        {current && isCoordinator && <Link to="/dashboards/devs">Devs</Link>}
         <Link to="/profile">Perfil</Link>
       </nav>
       <div className="app-user">
+        <OrgSwitcher />
         {user.avatar_url && (
           <img src={user.avatar_url} alt="" className="app-avatar" />
         )}
@@ -41,6 +69,10 @@ function Header() {
   );
 }
 
+function Protected({ children }) {
+  return <RequireAuth>{children}</RequireAuth>;
+}
+
 export default function App() {
   return (
     <div className="app-root">
@@ -50,33 +82,57 @@ export default function App() {
         <Route
           path="/"
           element={
-            <RequireAuth>
+            <Protected>
               <Home />
-            </RequireAuth>
+            </Protected>
           }
         />
         <Route
           path="/profile"
           element={
-            <RequireAuth>
+            <Protected>
               <Profile />
-            </RequireAuth>
+            </Protected>
           }
         />
         <Route
           path="/projects/new"
           element={
-            <RequireAuth>
+            <Protected>
               <ProjectWizard />
-            </RequireAuth>
+            </Protected>
           }
         />
         <Route
           path="/projects/:id"
           element={
-            <RequireAuth>
+            <Protected>
               <ProjectDetail />
-            </RequireAuth>
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/my"
+          element={
+            <Protected>
+              <MyIssues />
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/org"
+          element={
+            <Protected>
+              <OrgIssues />
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/devs"
+          element={
+            <Protected>
+              <Devs />
+            </Protected>
           }
         />
         <Route path="*" element={<Navigate to="/" replace />} />

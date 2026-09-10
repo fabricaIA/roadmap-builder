@@ -87,6 +87,8 @@ def _upsert_project(
     if p is None:
         p = Project(created_by_user_id=user.id, owner=owner, repo=repo, source=source)
         db.add(p)
+    # tenant: o owner do repo (org ou conta pessoal).
+    p.org_login = owner
     if title:
         p.title = title
     if project_number is not None:

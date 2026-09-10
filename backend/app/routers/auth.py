@@ -15,6 +15,7 @@ from backend.app.db import get_db
 from backend.app.deps import get_current_user
 from backend.app.models import User, _utcnow
 from backend.app.security import issue_session
+from backend.app.services.orgs import sync_orgs
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -84,6 +85,13 @@ def github_callback(
     user.last_login_at = _utcnow()
     db.commit()
     db.refresh(user)
+
+    # Multi-tenant: sincroniza orgs + papéis com o token OAuth (best-effort;
+    # exige `read:org` — se não concedido, o usuário sincroniza depois via PAT).
+    try:
+        sync_orgs(db, user, access_token)
+    except Exception:  # noqa: BLE001
+        logger.warning("Sync de orgs no login falhou (seguindo).", exc_info=True)
 
     resp = RedirectResponse(settings.frontend_url, status_code=302)
     _set_session_cookie(resp, issue_session(user.id))

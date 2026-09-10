@@ -1,7 +1,7 @@
 """Modelos ORM.
 
-PR1: `User`. PR2: `Project`. `Organization`, `OrgMembership` e `PhaseRun`
-entram nos PRs seguintes (ver plano).
+PR1: `User`. PR2: `Project`. PR3: `PhaseRun`. PR4: `Organization`,
+`OrgMembership`.
 """
 
 from __future__ import annotations
@@ -90,3 +90,39 @@ class PhaseRun(Base):
     applied_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
+
+
+class Organization(Base):
+    """Tenant = organização do GitHub."""
+
+    __tablename__ = "organizations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    github_org_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    login: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+class OrgMembership(Base):
+    """Vínculo usuário↔org com o papel derivado do GitHub.
+
+    role "admin" → coordenador; "member" → dev.
+    """
+
+    __tablename__ = "org_memberships"
+    __table_args__ = (
+        UniqueConstraint("user_id", "org_id", name="uq_membership_user_org"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    org_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="member")
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+    @property
+    def is_coordinator(self) -> bool:
+        return self.role == "admin"
