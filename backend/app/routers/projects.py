@@ -16,6 +16,7 @@ from backend.app.github import humanize_error
 from backend.app.models import PhaseRun, Project, User
 from backend.app.routers.roadmap import RoadmapPayload
 from backend.app.security import decrypt_pat
+from backend.app.services.dashboards import collect_issues
 from backend.app.services.github_read import project_v2_meta, repo_summary
 from backend.app.services.roadmap import (
     apply_phase,
@@ -205,6 +206,19 @@ def create_project_endpoint(
         config=payload.config,
     )
     return {**result, "project": _project_dict(project)}
+
+
+@router.get("/{project_id}/issues")
+def get_project_issues(
+    project_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Issues live do repositório do projeto, no mesmo formato dos dashboards
+    (para o Board por projeto)."""
+    p = _project_or_404(db, user, project_id)
+    issues, errors = collect_issues(_pat(user), [(p.owner, p.repo)])
+    return {"issues": issues, "errors": errors, "repos": 1}
 
 
 @router.get("/{project_id}/phases")

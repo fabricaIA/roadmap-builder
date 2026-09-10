@@ -137,3 +137,32 @@ def test_devs_for_coordinator(monkeypatch, auth_client, admin):
     devs = {d["dev"]: d for d in body["devs"]}
     assert devs["bob"]["open"] == 1  # assignee de u1
     assert devs["alice"]["open"] == 1  # assignee de u3
+
+
+def test_project_issues_endpoint(monkeypatch, auth_client, db, user):
+    user.pat_encrypted = encrypt_pat("ghp_x")
+    p = Project(created_by_user_id=user.id, owner="acme", repo="r1", title="P")
+    db.add(p)
+    db.commit()
+    db.refresh(p)
+    monkeypatch.setattr(
+        "backend.app.routers.projects.collect_issues",
+        lambda tok, repos: (
+            [{**i, "phase": dash.phase_of(i), "repo": "acme/r1"} for i in ISSUES],
+            [],
+        ),
+    )
+    body = auth_client.get(f"/api/projects/{p.id}/issues").json()
+    assert body["repos"] == 1
+    assert len(body["issues"]) == 3
+
+
+def test_project_issues_other_user_404(auth_client, db, user):
+    user.pat_encrypted = encrypt_pat("ghp_x")
+    other = User(github_id=77, login="x")
+    db.add(other)
+    db.flush()
+    p = Project(created_by_user_id=other.id, owner="o", repo="r", title="P")
+    db.add(p)
+    db.commit()
+    assert auth_client.get(f"/api/projects/{p.id}/issues").status_code == 404

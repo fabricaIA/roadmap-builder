@@ -945,8 +945,14 @@ a.btn-success {
 }
 
 .issue-tab.active {
+  background: transparent;
   color: #1f6feb;
   border-bottom-color: #1f6feb;
+}
+
+.issue-tab:focus {
+  outline: none;
+  background: #eef4ff;
 }
 
 .issue-tab-count {

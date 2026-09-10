@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
+import BoardView from "./dashboards/BoardView";
 
 const STATUS_LABEL = {
   created: "criada",
@@ -19,6 +20,25 @@ export default function ProjectDetail() {
   const [alertMode, setAlertMode] = useState(false); // on_duplicate = "error"
   const [busyPhase, setBusyPhase] = useState("");
   const [toast, setToast] = useState("");
+  const [view, setView] = useState("phases"); // "phases" | "board"
+  const [board, setBoard] = useState(null);
+  const [boardLoading, setBoardLoading] = useState(false);
+
+  const loadBoard = useCallback(async () => {
+    setBoardLoading(true);
+    try {
+      setBoard(await apiFetch(`/api/projects/${id}/issues`));
+    } catch (e) {
+      setBoard({ issues: [], errors: [e.message], repos: 1 });
+    } finally {
+      setBoardLoading(false);
+    }
+  }, [id]);
+
+  const showBoard = () => {
+    setView("board");
+    if (!board) loadBoard();
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -131,76 +151,117 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      <div className="phase-head">
-        <h2>Fases</h2>
-        <label
-          className="alert-toggle"
-          title="Marcado: reaplicar uma fase completa retorna erro. Desmarcado: é ignorado (no-op)."
+      <div className="issue-tabs" style={{ marginTop: 20 }}>
+        <button
+          type="button"
+          className={`issue-tab ${view === "phases" ? "active" : ""}`}
+          onClick={() => setView("phases")}
+          title="Estado e aplicação de cada fase"
         >
-          <input
-            type="checkbox"
-            checked={alertMode}
-            onChange={(e) => setAlertMode(e.target.checked)}
-          />{" "}
-          Alertar se a fase já foi criada (em vez de ignorar)
-        </label>
+          Fases
+        </button>
+        <button
+          type="button"
+          className={`issue-tab ${view === "board" ? "active" : ""}`}
+          onClick={showBoard}
+          title="Board (colunas) das issues deste repositório"
+        >
+          Board
+        </button>
       </div>
 
-      {toast && (
-        <div
-          className={`message ${toast.startsWith("Erro") ? "error" : "success"}`}
-        >
-          {toast}
+      {view === "board" && (
+        <div className="board-page">
+          {boardLoading && !board && (
+            <p style={{ color: "#666" }}>Carregando…</p>
+          )}
+          {board && (
+            <BoardView
+              issues={board.issues}
+              errors={board.errors}
+              showRepoFilter={false}
+              loading={boardLoading}
+              onRefresh={loadBoard}
+            />
+          )}
         </div>
       )}
 
-      {phases === null || phases.length === 0 ? (
-        <p style={{ color: "#666" }}>
-          {project.summary_error
-            ? "Não foi possível calcular o estado das fases (sem acesso ao GitHub)."
-            : "Nenhuma fase no template/config."}
-        </p>
-      ) : (
-        <div className="phase-list">
-          {phases.map((ph) => (
-            <div className="phase-row wide" key={ph.phase}>
-              <div className="phase-title">
-                {ph.title}{" "}
-                <span className={`phase-badge ${ph.status}`}>
-                  {STATUS_LABEL[ph.status] || ph.status}
-                  {ph.status === "partial" && ` ${ph.existing}/${ph.expected}`}
-                </span>
-              </div>
-              <div className="phase-counts">
-                {ph.existing}/{ph.expected} issues
-              </div>
-              <button
-                className="btn-secondary"
-                disabled={busyPhase === ph.phase}
-                onClick={() => applyPhase(ph.phase)}
-                title={`Cria as issues da fase ${ph.phase} no repositório (idempotente: não duplica as que já existem).`}
-              >
-                {busyPhase === ph.phase ? "Aplicando…" : "Aplicar Fase"}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {history.length > 0 && (
+      {view === "phases" && (
         <>
-          <h3 style={{ marginTop: 24 }}>Histórico</h3>
-          <ul className="history-list">
-            {history.map((h, i) => (
-              <li key={i}>
-                <strong>{h.phase}</strong> — {h.created} criada(s), {h.updated}{" "}
-                atualizada(s){" "}
-                <span style={{ color: "#888" }}>
-                  · {new Date(h.applied_at).toLocaleString()}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="phase-head">
+            <h2>Fases</h2>
+            <label
+              className="alert-toggle"
+              title="Marcado: reaplicar uma fase completa retorna erro. Desmarcado: é ignorado (no-op)."
+            >
+              <input
+                type="checkbox"
+                checked={alertMode}
+                onChange={(e) => setAlertMode(e.target.checked)}
+              />{" "}
+              Alertar se a fase já foi criada (em vez de ignorar)
+            </label>
+          </div>
+
+          {toast && (
+            <div
+              className={`message ${toast.startsWith("Erro") ? "error" : "success"}`}
+            >
+              {toast}
+            </div>
+          )}
+
+          {phases === null || phases.length === 0 ? (
+            <p style={{ color: "#666" }}>
+              {project.summary_error
+                ? "Não foi possível calcular o estado das fases (sem acesso ao GitHub)."
+                : "Nenhuma fase no template/config."}
+            </p>
+          ) : (
+            <div className="phase-list">
+              {phases.map((ph) => (
+                <div className="phase-row wide" key={ph.phase}>
+                  <div className="phase-title">
+                    {ph.title}{" "}
+                    <span className={`phase-badge ${ph.status}`}>
+                      {STATUS_LABEL[ph.status] || ph.status}
+                      {ph.status === "partial" &&
+                        ` ${ph.existing}/${ph.expected}`}
+                    </span>
+                  </div>
+                  <div className="phase-counts">
+                    {ph.existing}/{ph.expected} issues
+                  </div>
+                  <button
+                    className="btn-secondary"
+                    disabled={busyPhase === ph.phase}
+                    onClick={() => applyPhase(ph.phase)}
+                    title={`Cria as issues da fase ${ph.phase} no repositório (idempotente: não duplica as que já existem).`}
+                  >
+                    {busyPhase === ph.phase ? "Aplicando…" : "Aplicar Fase"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <>
+              <h3 style={{ marginTop: 24 }}>Histórico</h3>
+              <ul className="history-list">
+                {history.map((h, i) => (
+                  <li key={i}>
+                    <strong>{h.phase}</strong> — {h.created} criada(s),{" "}
+                    {h.updated} atualizada(s){" "}
+                    <span style={{ color: "#888" }}>
+                      · {new Date(h.applied_at).toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </>
       )}
     </div>

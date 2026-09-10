@@ -124,7 +124,8 @@ export default function Manual() {
           <strong>Board</strong> — colunas com as issues que existem no GitHub
           (a visão de gestão de um board), agrupáveis por fase, estado ou
           responsável, com filtro por repositório/responsável. Cada card abre a
-          issue no GitHub.
+          issue no GitHub. Há o Board da organização (menu) e o Board de um
+          projeto específico (aba "Board" na tela do projeto).
         </li>
         <li>
           <strong>Devs</strong> (coordenador) — matriz de progresso por
