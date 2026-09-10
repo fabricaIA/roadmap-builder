@@ -780,3 +780,62 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   color: #6b7684;
   text-align: right;
 }
+
+/* --- Fases (PR3) --- */
+.phase-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.alert-toggle {
+  font-size: 0.82rem;
+  color: #6b7684;
+}
+
+.phase-row.wide {
+  grid-template-columns: 1fr 130px 130px;
+}
+
+.phase-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.phase-badge.created {
+  background: #d3f9d8;
+  color: #2b8a3e;
+}
+
+.phase-badge.partial {
+  background: #fff3bf;
+  color: #a5730a;
+}
+
+.phase-badge.not_created {
+  background: #f1f3f5;
+  color: #868e96;
+}
+
+.phase-badge.empty {
+  background: #f1f3f5;
+  color: #adb5bd;
+}
+
+.history-list {
+  font-size: 0.85rem;
+  color: #4a5568;
+  padding-left: 18px;
+}
+
+.history-list li {
+  margin: 4px 0;
+}

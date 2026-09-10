@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 from backend.app.github import humanize_error, missing_project_scope
 from scripts.roadmap_builder import (
+    API,
     add_issues_to_project,
     create_project,
     ensure_issues,
@@ -24,8 +25,10 @@ from scripts.roadmap_builder import (
     get_project_id,
     link_project_to_repository,
     milestone_due_dates,
+    paginate_get,
     parse_date,
     schedule_issues,
+    select_issues,
     validate_config,
     validate_remote_access,
 )
@@ -61,6 +64,31 @@ class _MockArgs:
         self.project_number = project_number
 
 
+def _parse_start_date(project_start_date: str | None, cfg: dict[str, Any]):
+    if project_start_date:
+        return parse_date(project_start_date)
+    if cfg.get("schedule", {}).get("project_start_date"):
+        return parse_date(cfg["schedule"]["project_start_date"])
+    return None
+
+
+def _existing_issue_titles(token: str, owner: str, repo: str) -> set[str]:
+    rows = paginate_get(
+        f"{API}/repos/{owner}/{repo}/issues?state=all&per_page=100", token
+    )
+    return {r["title"] for r in rows if "pull_request" not in r}
+
+
+def _tally(results: list[dict[str, Any]]) -> dict[str, int]:
+    out = {"created": 0, "updated": 0, "skipped": 0}
+    for r in results:
+        if r["outcome"] in ("created", "would_create"):
+            out["created"] += 1
+        elif r["outcome"] in ("updated", "would_update"):
+            out["updated"] += 1
+    return out
+
+
 def build_roadmap(
     *,
     token: str,
@@ -72,8 +100,12 @@ def build_roadmap(
     project_number: int | None,
     project_start_date: str | None,
     cfg: dict[str, Any],
+    phase_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """Cria/atualiza milestones, labels, issues e (opcionalmente) o Project V2.
+
+    `phase_keys` (opcional) restringe a criação de issues às fases dadas;
+    milestones/labels continuam garantidos por inteiro.
 
     Devolve `{status: "success"|"partial", message, issues_created, project_error?}`.
     Levanta HTTPException(400/500) nos erros de validação/negócio.
@@ -84,12 +116,7 @@ def build_roadmap(
             status_code=400, detail=format_validation_errors(validation_errors)
         )
 
-    start_date = None
-    if project_start_date:
-        start_date = parse_date(project_start_date)
-    elif cfg.get("schedule", {}).get("project_start_date"):
-        start_date = parse_date(cfg["schedule"]["project_start_date"])
-
+    start_date = _parse_start_date(project_start_date, cfg)
     issue_schedule = schedule_issues(cfg, start_date)
     due_dates = milestone_due_dates(issue_schedule)
 
@@ -115,9 +142,10 @@ def build_roadmap(
     try:
         milestones = ensure_milestones(owner, repo, token, cfg, apply, due_dates)
         ensure_labels(owner, repo, token, cfg, apply)
-        titles = ensure_issues(
-            owner, repo, token, cfg, milestones, apply, issue_schedule
+        issue_results = ensure_issues(
+            owner, repo, token, cfg, milestones, apply, issue_schedule, phase_keys
         )
+        titles = [r["title"] for r in issue_results]
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=humanize_error(str(exc)))
     except Exception:
@@ -147,6 +175,7 @@ def build_roadmap(
                     "de projeto (Projects V2) não foi concluída."
                 ),
                 "issues_created": titles,
+                "issue_results": issue_results,
                 "project_error": humanize_error(str(exc)),
                 "project_node_id": project_node_id,
             }
@@ -155,5 +184,157 @@ def build_roadmap(
         "status": "success",
         "message": "Roadmap processado com sucesso!",
         "issues_created": titles,
+        "issue_results": issue_results,
         "project_node_id": project_node_id,
+    }
+
+
+def phase_status(
+    token: str, owner: str, repo: str, cfg: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Estado de cada fase: quantas issues esperadas já existem no repo."""
+    existing = _existing_issue_titles(token, owner, repo)
+    milestones = cfg.get("milestones") or []
+    out = []
+    for m in milestones:
+        key = m["key"]
+        expected = [i for i in cfg.get("issues", []) if i["milestone"] == key]
+        exp_titles = [i["title"] for i in expected]
+        have = sum(1 for t in exp_titles if t in existing)
+        if not exp_titles:
+            status = "empty"
+        elif have == 0:
+            status = "not_created"
+        elif have < len(exp_titles):
+            status = "partial"
+        else:
+            status = "created"
+        out.append(
+            {
+                "phase": key,
+                "title": m.get("title", key),
+                "description": m.get("description", ""),
+                "expected": len(exp_titles),
+                "existing": have,
+                "status": status,
+            }
+        )
+    return out
+
+
+def apply_phase(
+    *,
+    token: str,
+    owner: str,
+    repo: str,
+    cfg: dict[str, Any],
+    phase_key: str,
+    on_duplicate: str = "skip",
+    apply: bool = True,
+    project_number: int | None = None,
+    project_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Cria apenas as issues de uma fase, tratando duplicação.
+
+    - `on_duplicate="skip"` (default): se a fase já está completa, no-op
+      (`status="already_done"`).
+    - `on_duplicate="error"`: 409 se a fase já está completa.
+    Milestones e labels são sempre garantidos por inteiro (datas coerentes).
+    """
+    validation_errors = validate_config(cfg)
+    if validation_errors:
+        raise HTTPException(
+            status_code=400, detail=format_validation_errors(validation_errors)
+        )
+
+    expected = select_issues(cfg, [phase_key])
+    if not expected:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Fase '{phase_key}' não tem issues no template/config.",
+        )
+    expected_titles = [i["title"] for i in expected]
+
+    start_date = _parse_start_date(project_start_date, cfg)
+    issue_schedule = schedule_issues(cfg, start_date)
+    due_dates = milestone_due_dates(issue_schedule)
+
+    if not apply:
+        results = ensure_issues(
+            owner, repo, token, cfg, {}, False, issue_schedule, [phase_key]
+        )
+        return {"status": "dry_run", "phase": phase_key, "issues": results, **_tally(results)}
+
+    remote_errors = validate_remote_access(
+        _MockArgs(owner, repo, False, project_number), token
+    )
+    if remote_errors:
+        raise HTTPException(
+            status_code=400,
+            detail=humanize_error(format_validation_errors(remote_errors)),
+        )
+
+    try:
+        existing = _existing_issue_titles(token, owner, repo)
+        if all(t in existing for t in expected_titles):
+            if on_duplicate == "error":
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Fase {phase_key} já foi criada "
+                        f"({len(expected_titles)} issues já existem no repositório)."
+                    ),
+                )
+            return {
+                "status": "already_done",
+                "phase": phase_key,
+                "message": f"Fase {phase_key} já está completa — nada a fazer.",
+                "created": 0,
+                "updated": 0,
+                "skipped": len(expected_titles),
+                "issues": [
+                    {"title": t, "milestone": phase_key, "outcome": "skipped"}
+                    for t in expected_titles
+                ],
+            }
+
+        milestones = ensure_milestones(owner, repo, token, cfg, True, due_dates)
+        ensure_labels(owner, repo, token, cfg, True)
+        results = ensure_issues(
+            owner, repo, token, cfg, milestones, True, issue_schedule, [phase_key]
+        )
+        titles = [r["title"] for r in results]
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=humanize_error(str(exc)))
+    except Exception:
+        logger.exception("Erro inesperado ao aplicar a fase %s.", phase_key)
+        raise HTTPException(
+            status_code=500, detail="Erro interno, verifique os logs do servidor"
+        )
+
+    project_error = None
+    if project_number:
+        try:
+            project_node_id = get_project_id(owner, token, project_number)
+            link_project_to_repository(owner, repo, token, project_node_id)
+            add_issues_to_project(
+                owner, repo, token, project_node_id, cfg, titles, True, issue_schedule
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Falha ao vincular a fase %s ao painel.", phase_key)
+            project_error = humanize_error(str(exc))
+
+    tally = _tally(results)
+    return {
+        "status": "applied",
+        "phase": phase_key,
+        "message": (
+            f"Fase {phase_key}: {tally['created']} criada(s), "
+            f"{tally['updated']} atualizada(s)."
+        ),
+        **tally,
+        "issues": results,
+        "project_error": project_error,
     }

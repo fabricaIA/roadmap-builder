@@ -66,7 +66,27 @@ class Project(Base):
     source: Mapped[str] = mapped_column(String(16), default="created")
     # Preenchido no PR4 (multi-tenant); nulo = conta pessoal.
     org_login: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # Config do roadmap (milestones/labels/issues) informada no wizard.
+    # Usada para aplicar issues por fase; vazio => cai no template do repo.
+    config_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}")
 
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+
+
+class PhaseRun(Base):
+    """Auditoria de cada aplicação de fase (base para os dashboards do PR4)."""
+
+    __tablename__ = "phase_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    phase_key: Mapped[str] = mapped_column(String(32))
+    created_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_count: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_count: Mapped[int] = mapped_column(Integer, default=0)
+    applied_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )

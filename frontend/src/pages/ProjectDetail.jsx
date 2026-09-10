@@ -2,17 +2,38 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
 
+const STATUS_LABEL = {
+  created: "criada",
+  partial: "parcial",
+  not_created: "não criada",
+  empty: "sem issues",
+};
+
 export default function ProjectDetail() {
   const { id } = useParams();
   const [project, setProject] = useState(null);
+  const [phases, setPhases] = useState(null);
+  const [history, setHistory] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [alertMode, setAlertMode] = useState(false); // on_duplicate = "error"
+  const [busyPhase, setBusyPhase] = useState("");
+  const [toast, setToast] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      setProject(await apiFetch(`/api/projects/${id}`));
+      const [p, ph] = await Promise.all([
+        apiFetch(`/api/projects/${id}`),
+        apiFetch(`/api/projects/${id}/phases`).catch(() => ({
+          phases: [],
+          history: [],
+        })),
+      ]);
+      setProject(p);
+      setPhases(ph.phases || []);
+      setHistory(ph.history || []);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -24,6 +45,33 @@ export default function ProjectDetail() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
   }, [load]);
+
+  const applyPhase = async (phaseKey) => {
+    setBusyPhase(phaseKey);
+    setToast("");
+    try {
+      const res = await apiFetch(
+        `/api/projects/${id}/phases/${phaseKey}/apply`,
+        {
+          method: "POST",
+          body: { on_duplicate: alertMode ? "error" : "skip", apply: true },
+        },
+      );
+      if (res.status === "already_done") {
+        setToast(`Fase ${phaseKey} já estava completa — nada a fazer.`);
+      } else {
+        setToast(
+          `Fase ${phaseKey}: ${res.created} criada(s), ${res.updated} atualizada(s).` +
+            (res.project_error ? ` (painel: ${res.project_error})` : ""),
+        );
+      }
+      await load();
+    } catch (e) {
+      setToast(`Erro: ${e.message}`);
+    } finally {
+      setBusyPhase("");
+    }
+  };
 
   if (loading) return <div className="page-center">Carregando…</div>;
   if (error)
@@ -67,51 +115,88 @@ export default function ProjectDetail() {
       )}
 
       {s && (
-        <>
-          <div className="stat-row">
-            <div className="stat">
-              <div className="stat-num">{s.issues.open}</div>
-              <div className="stat-label">abertas</div>
-            </div>
-            <div className="stat">
-              <div className="stat-num">{s.issues.closed}</div>
-              <div className="stat-label">fechadas</div>
-            </div>
-            <div className="stat">
-              <div className="stat-num">{s.issues.total}</div>
-              <div className="stat-label">total</div>
-            </div>
+        <div className="stat-row">
+          <div className="stat">
+            <div className="stat-num">{s.issues.open}</div>
+            <div className="stat-label">abertas</div>
           </div>
+          <div className="stat">
+            <div className="stat-num">{s.issues.closed}</div>
+            <div className="stat-label">fechadas</div>
+          </div>
+          <div className="stat">
+            <div className="stat-num">{s.issues.total}</div>
+            <div className="stat-label">total</div>
+          </div>
+        </div>
+      )}
 
-          <h2 style={{ marginTop: 24 }}>Fases</h2>
-          <div className="phase-list">
-            {s.milestones.length === 0 && (
-              <p style={{ color: "#666" }}>
-                Nenhuma milestone no repositório ainda.
-              </p>
-            )}
-            {s.milestones.map((m) => {
-              const pct = m.total ? Math.round((m.closed / m.total) * 100) : 0;
-              return (
-                <div className="phase-row" key={m.title}>
-                  <div className="phase-title">{m.title}</div>
-                  <div className="phase-bar">
-                    <div
-                      className="phase-bar-fill"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                  <div className="phase-counts">
-                    {m.closed}/{m.total} concluídas
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <p className="subtitle" style={{ color: "#666", marginTop: 16 }}>
-            A aplicação de issues por fase (e o tratamento de duplicação) chega
-            na próxima entrega.
-          </p>
+      <div className="phase-head">
+        <h2>Fases</h2>
+        <label className="alert-toggle">
+          <input
+            type="checkbox"
+            checked={alertMode}
+            onChange={(e) => setAlertMode(e.target.checked)}
+          />{" "}
+          Alertar se a fase já foi criada (em vez de ignorar)
+        </label>
+      </div>
+
+      {toast && (
+        <div
+          className={`message ${toast.startsWith("Erro") ? "error" : "success"}`}
+        >
+          {toast}
+        </div>
+      )}
+
+      {phases === null || phases.length === 0 ? (
+        <p style={{ color: "#666" }}>
+          {project.summary_error
+            ? "Não foi possível calcular o estado das fases (sem acesso ao GitHub)."
+            : "Nenhuma fase no template/config."}
+        </p>
+      ) : (
+        <div className="phase-list">
+          {phases.map((ph) => (
+            <div className="phase-row wide" key={ph.phase}>
+              <div className="phase-title">
+                {ph.title}{" "}
+                <span className={`phase-badge ${ph.status}`}>
+                  {STATUS_LABEL[ph.status] || ph.status}
+                  {ph.status === "partial" && ` ${ph.existing}/${ph.expected}`}
+                </span>
+              </div>
+              <div className="phase-counts">
+                {ph.existing}/{ph.expected} issues
+              </div>
+              <button
+                className="btn-secondary"
+                disabled={busyPhase === ph.phase}
+                onClick={() => applyPhase(ph.phase)}
+              >
+                {busyPhase === ph.phase ? "Aplicando…" : "Aplicar Fase"}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 24 }}>Histórico</h3>
+          <ul className="history-list">
+            {history.map((h, i) => (
+              <li key={i}>
+                <strong>{h.phase}</strong> — {h.created} criada(s), {h.updated}{" "}
+                atualizada(s){" "}
+                <span style={{ color: "#888" }}>
+                  · {new Date(h.applied_at).toLocaleString()}
+                </span>
+              </li>
+            ))}
+          </ul>
         </>
       )}
     </div>

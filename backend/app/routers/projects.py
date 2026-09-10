@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,11 +13,16 @@ from sqlalchemy.orm import Session
 from backend.app.db import get_db
 from backend.app.deps import require_user
 from backend.app.github import humanize_error
-from backend.app.models import Project, User
+from backend.app.models import PhaseRun, Project, User
 from backend.app.routers.roadmap import RoadmapPayload
 from backend.app.security import decrypt_pat
 from backend.app.services.github_read import project_v2_meta, repo_summary
-from backend.app.services.roadmap import build_roadmap
+from backend.app.services.roadmap import (
+    apply_phase,
+    build_roadmap,
+    load_backlog_template,
+    phase_status,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -26,6 +32,12 @@ class ImportPayload(BaseModel):
     owner: str
     repo: str
     project_number: int | None = None
+
+
+class PhaseApplyPayload(BaseModel):
+    on_duplicate: str = "skip"  # "skip" | "error"
+    apply: bool = True
+    project_start_date: str | None = None
 
 
 def _pat(user: User) -> str:
@@ -63,6 +75,7 @@ def _upsert_project(
     source: str,
     project_number: int | None = None,
     project_url: str | None = None,
+    config: dict | None = None,
 ) -> Project:
     p = db.execute(
         select(Project).where(
@@ -80,9 +93,29 @@ def _upsert_project(
         p.project_number = project_number
     if project_url is not None:
         p.project_url = project_url
+    if config:
+        p.config_json = json.dumps(config)
     db.commit()
     db.refresh(p)
     return p
+
+
+def _project_or_404(db: Session, user: User, project_id: int) -> Project:
+    p = db.get(Project, project_id)
+    if p is None or p.created_by_user_id != user.id:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado.")
+    return p
+
+
+def _project_cfg(p: Project) -> dict:
+    """Config do wizard guardada no projeto; se vazia, cai no template do repo."""
+    try:
+        cfg = json.loads(p.config_json or "{}")
+    except json.JSONDecodeError:
+        cfg = {}
+    if cfg.get("issues"):
+        return cfg
+    return load_backlog_template()
 
 
 @router.get("")
@@ -166,8 +199,77 @@ def create_project_endpoint(
         source="created",
         project_number=number,
         project_url=url,
+        config=payload.config,
     )
     return {**result, "project": _project_dict(project)}
+
+
+@router.get("/{project_id}/phases")
+def get_phases(
+    project_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    p = _project_or_404(db, user, project_id)
+    runs = (
+        db.execute(
+            select(PhaseRun)
+            .where(PhaseRun.project_id == p.id)
+            .order_by(PhaseRun.applied_at.desc())
+        )
+        .scalars()
+        .all()
+    )
+    history = [
+        {
+            "phase": r.phase_key,
+            "created": r.created_count,
+            "updated": r.updated_count,
+            "skipped": r.skipped_count,
+            "applied_at": r.applied_at.isoformat() if r.applied_at else None,
+        }
+        for r in runs
+    ]
+    try:
+        phases = phase_status(_pat(user), p.owner, p.repo, _project_cfg(p))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=humanize_error(str(exc)))
+    return {"phases": phases, "history": history}
+
+
+@router.post("/{project_id}/phases/{phase_key}/apply")
+def apply_project_phase(
+    project_id: int,
+    phase_key: str,
+    body: PhaseApplyPayload,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    p = _project_or_404(db, user, project_id)
+    result = apply_phase(
+        token=_pat(user),
+        owner=p.owner,
+        repo=p.repo,
+        cfg=_project_cfg(p),
+        phase_key=phase_key,
+        on_duplicate=body.on_duplicate,
+        apply=body.apply,
+        project_number=p.project_number,
+        project_start_date=body.project_start_date,
+    )
+    if result.get("status") == "applied":
+        db.add(
+            PhaseRun(
+                project_id=p.id,
+                user_id=user.id,
+                phase_key=phase_key,
+                created_count=result.get("created", 0),
+                updated_count=result.get("updated", 0),
+                skipped_count=result.get("skipped", 0),
+            )
+        )
+        db.commit()
+    return result
 
 
 @router.post("/import")

@@ -56,6 +56,21 @@ export GITHUB_TOKEN=<SEU_TOKEN>
 python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply
 ```
 
+### Criar apenas as issues de uma fase
+
+`--phase` cria só as issues do milestone indicado (repita para várias). As
+milestones e labels continuam sendo garantidas por inteiro. É idempotente:
+reexecutar não duplica issues (as existentes são atualizadas).
+
+```bash
+python3 scripts/roadmap_builder.py --owner <OWNER> --repo <REPO> --apply --phase M1
+# depois:
+python3 scripts/roadmap_builder.py --owner <OWNER> --repo <REPO> --apply --phase M2
+```
+
+Na aplicação web isso aparece no detalhe do projeto (botão "Aplicar Fase" por
+fase, com aviso ou no-op quando a fase já existe).
+
 ### Definir cronograma estimado
 
 Informe a data prevista de início do projeto para o script calcular as datas em sequência:

@@ -391,6 +391,25 @@ def graphql(token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]
     raise RuntimeError(last_error)
 
 
+def paginate_get(base_url: str, token: str, per_page: int = 100) -> list[dict[str, Any]]:
+    """GET paginado da API REST. `base_url` deve conter '?' e `per_page`.
+
+    Corrige a limitacao anterior de ler apenas a primeira pagina (100 itens),
+    que quebrava a deducao de duplicados em repositorios maiores.
+    """
+    items: list[dict[str, Any]] = []
+    page = 1
+    while True:
+        chunk = request_json("GET", f"{base_url}&page={page}", token)
+        if not chunk:
+            break
+        items.extend(chunk)
+        if len(chunk) < per_page:
+            break
+        page += 1
+    return items
+
+
 def ensure_milestones(
     owner: str,
     repo: str,
@@ -406,7 +425,9 @@ def ensure_milestones(
             print(f"[DRY-RUN] Milestone {milestone} teria data alvo {iso_date(due_on)}")
         return {}
 
-    current = request_json("GET", url, token)
+    current = paginate_get(
+        f"{API}/repos/{owner}/{repo}/milestones?state=all&per_page=100", token
+    )
     by_title = {m["title"]: m["number"] for m in current}
     out: dict[str, int] = {}
 
@@ -447,7 +468,9 @@ def ensure_labels(owner: str, repo: str, token: str, cfg: dict[str, Any], apply:
         print(f"[DRY-RUN] Consultaria labels: {url}")
         return
 
-    current = request_json("GET", url, token)
+    current = paginate_get(
+        f"{API}/repos/{owner}/{repo}/labels?per_page=100", token
+    )
     existing = {label["name"] for label in current}
 
     for label in cfg["labels"]:
@@ -507,6 +530,16 @@ def issue_body(issue: dict[str, Any], schedule: dict[str, Any] | None = None) ->
     )
 
 
+def select_issues(
+    cfg: dict[str, Any], phase_keys: list[str] | None
+) -> list[dict[str, Any]]:
+    """Issues do cfg, opcionalmente filtradas pelas fases (milestone keys)."""
+    if phase_keys is None:
+        return list(cfg["issues"])
+    keys = set(phase_keys)
+    return [i for i in cfg["issues"] if i["milestone"] in keys]
+
+
 def ensure_issues(
     owner: str,
     repo: str,
@@ -515,11 +548,18 @@ def ensure_issues(
     milestones: dict[str, int],
     apply: bool,
     issue_schedule: dict[str, dict[str, Any]],
-) -> list[str]:
-    titles = [i["title"] for i in cfg["issues"]]
+    phase_keys: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Cria/atualiza issues (idempotente por titulo).
+
+    Retorna, para cada issue considerada, `{"title", "milestone", "outcome"}`
+    com outcome em {"created", "updated", "would_create", "would_update"}.
+    """
+    selected = select_issues(cfg, phase_keys)
+
     if not apply:
-        print(f"[DRY-RUN] Criaria {len(titles)} issues")
-        for item in cfg["issues"]:
+        results = []
+        for item in selected:
             schedule = issue_schedule.get(item["title"])
             if schedule:
                 unit_label = "dia(s)" if schedule["duration_unit"] == "days" else "mes(es)"
@@ -529,42 +569,54 @@ def ensure_issues(
                     f"-> {iso_date(schedule['end_date'])} "
                     f"({schedule['duration_value']} {unit_label}, milestone {schedule['milestone']})"
                 )
-        return titles
+            results.append(
+                {
+                    "title": item["title"],
+                    "milestone": item["milestone"],
+                    "outcome": "would_create",
+                }
+            )
+        print(f"[DRY-RUN] Criaria/atualizaria {len(results)} issues")
+        return results
 
-    current = request_json("GET", f"{API}/repos/{owner}/{repo}/issues?state=all&per_page=100", token)
-    existing = {item.get("title"): item for item in current if "pull_request" not in item}
+    current = paginate_get(
+        f"{API}/repos/{owner}/{repo}/issues?state=all&per_page=100", token
+    )
+    existing = {
+        item.get("title"): item for item in current if "pull_request" not in item
+    }
 
-    created_titles: list[str] = []
-    for item in cfg["issues"]:
+    results: list[dict[str, Any]] = []
+    for item in selected:
+        schedule = issue_schedule.get(item["title"])
+        payload_body = {
+            "body": issue_body(item, schedule),
+            "labels": item["labels"],
+            "milestone": milestones[item["milestone"]],
+        }
         if item["title"] in existing:
-            print(f"[OK] Issue ja existe: {item['title']}")
-            schedule = issue_schedule.get(item["title"])
-            patch_payload = {
-                "body": issue_body(item, schedule),
-                "labels": item["labels"],
-                "milestone": milestones[item["milestone"]],
-            }
             request_json(
                 "PATCH",
                 f"{API}/repos/{owner}/{repo}/issues/{existing[item['title']]['number']}",
                 token,
-                patch_payload,
+                payload_body,
             )
-            print(f"[OK] Issue atualizada com planejamento: {item['title']}")
-            created_titles.append(item["title"])
-            continue
+            print(f"[OK] Issue atualizada: {item['title']}")
+            outcome = "updated"
+        else:
+            request_json(
+                "POST",
+                f"{API}/repos/{owner}/{repo}/issues",
+                token,
+                {"title": item["title"], **payload_body},
+            )
+            print(f"[NEW] Issue criada: {item['title']}")
+            outcome = "created"
+        results.append(
+            {"title": item["title"], "milestone": item["milestone"], "outcome": outcome}
+        )
 
-        payload = {
-            "title": item["title"],
-            "body": issue_body(item, issue_schedule.get(item["title"])),
-            "labels": item["labels"],
-            "milestone": milestones[item["milestone"]],
-        }
-        request_json("POST", f"{API}/repos/{owner}/{repo}/issues", token, payload)
-        print(f"[NEW] Issue criada: {item['title']}")
-        created_titles.append(item["title"])
-
-    return created_titles
+    return results
 
 
 def get_owner_type(owner: str, token: str) -> str:
@@ -832,7 +884,9 @@ def add_issues_to_project(
         print(f"[DRY-RUN] Adicionaria {len(titles)} issues ao project {project_id}")
         return
 
-    all_issues = request_json("GET", f"{API}/repos/{owner}/{repo}/issues?state=all&per_page=100", token)
+    all_issues = paginate_get(
+        f"{API}/repos/{owner}/{repo}/issues?state=all&per_page=100", token
+    )
     by_title = {i["title"]: i for i in all_issues if "pull_request" not in i}
 
     mutation = """
@@ -875,6 +929,13 @@ def parse_args() -> argparse.Namespace:
         type=parse_date,
         help="Data estimada de inicio do projeto no formato AAAA-MM-DD. Habilita calculo de prazos.",
     )
+    parser.add_argument(
+        "--phase",
+        action="append",
+        metavar="M1",
+        help="Cria apenas as issues desta fase (milestone key). Repita para varias. "
+        "Sem --phase, cria todas.",
+    )
     return parser.parse_args()
 
 
@@ -903,7 +964,17 @@ def main() -> int:
 
     milestones = ensure_milestones(args.owner, args.repo, token, cfg, args.apply, due_dates)
     ensure_labels(args.owner, args.repo, token, cfg, args.apply)
-    titles = ensure_issues(args.owner, args.repo, token, cfg, milestones, args.apply, issue_schedule)
+    issue_results = ensure_issues(
+        args.owner,
+        args.repo,
+        token,
+        cfg,
+        milestones,
+        args.apply,
+        issue_schedule,
+        phase_keys=args.phase,
+    )
+    titles = [r["title"] for r in issue_results]
 
     if args.create_project or args.project_number:
         if not args.apply:
