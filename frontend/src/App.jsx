@@ -1,1125 +1,199 @@
-import { useCallback, useEffect, useState } from "react";
+import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { useAuth } from "./auth/useAuth";
+import { useOrg } from "./org/useOrg";
+import Home from "./pages/Home";
+import Login from "./pages/Login";
+import Manual from "./pages/Manual";
+import Profile from "./pages/Profile";
+import ProjectDetail from "./pages/ProjectDetail";
+import ProjectWizard from "./pages/ProjectWizard";
+import Board from "./pages/dashboards/Board";
+import Devs from "./pages/dashboards/Devs";
+import MyIssues from "./pages/dashboards/MyIssues";
+import OrgIssues from "./pages/dashboards/OrgIssues";
 import "./App.css";
 
-// F4: base da API configurável por ambiente (Vite expõe só variáveis VITE_*).
-// Fallback para o dev local padrão.
-const API_BASE = (
-  import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
-).replace(/\/+$/, "");
+function RequireAuth({ children }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
+  if (loading) return <div className="page-center">Carregando…</div>;
+  if (!user) return <Navigate to="/login" replace state={{ from: location }} />;
+  return children;
+}
 
-function App() {
-  const [started, setStarted] = useState(false);
-  const [step, setStep] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
-  const [result, setResult] = useState(null);
-  const [isTitleCustomized, setIsTitleCustomized] = useState(false);
-  // F2: preferência explícita do usuário para "criar painel", preservada
-  // quando o campo de Project existente é preenchido e depois limpo.
-  const [createProjectPref, setCreateProjectPref] = useState(true);
-  // F3: estado de carregamento/erro do template do backend.
-  const [templateLoading, setTemplateLoading] = useState(true);
-  const [templateError, setTemplateError] = useState("");
-
-  const [formData, setFormData] = useState({
-    githubToken: "",
-    owner: "",
-    repo: "",
-    apply: true,
-    createProject: true,
-    projectTitle: "Roadmap",
-    projectNumber: "",
-    projectStartDate: new Date().toISOString().split("T")[0],
-    milestones: [],
-    labels: [],
-    issues: [],
-  });
-
-  // Deriva o título do painel a partir de owner/repo (estado derivado, sem useEffect).
-  const deriveProjectTitle = (owner, repo) => {
-    const o = (owner || "").trim();
-    const r = (repo || "").trim();
-    if (o && r) return `${o}/${r} - Roadmap`;
-    if (o || r) return `${o || r} - Roadmap`;
-    return "Roadmap";
-  };
-
-  // Busca o template único diretamente do backend.
-  // F3: exposto via useCallback para permitir "tentar novamente" e mostrar erro visível.
-  const loadTemplate = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/backlog-template`);
-      if (!response.ok) {
-        throw new Error(`Resposta ${response.status} do servidor`);
-      }
-
-      const data = await response.json();
-      const durations = data.schedule?.milestone_durations || {};
-
-      const normalizedMilestones = (data.milestones || []).map((m) => ({
-        key: m.key,
-        title: m.title || "",
-        description: m.description || "",
-        value: durations[m.key]?.value ?? m.value ?? 1,
-        unit: durations[m.key]?.unit ?? m.unit ?? "months",
-      }));
-
-      const normalizedLabels = (data.labels || []).map((l) => ({
-        name: l.name,
-        color: l.color?.startsWith("#") ? l.color : `#${l.color || "0052CC"}`,
-        description: l.description || "",
-      }));
-
-      setTemplateError("");
-      setFormData((prev) => ({
-        ...prev,
-        projectStartDate:
-          data.schedule?.project_start_date || prev.projectStartDate,
-        milestones: normalizedMilestones,
-        labels: normalizedLabels,
-        issues: data.issues || [],
-      }));
-    } catch (error) {
-      console.error("Erro ao carregar backlog template:", error);
-      setTemplateError(
-        `Não foi possível carregar o modelo de backlog do servidor (${API_BASE}). ` +
-          "Verifique se o backend está no ar e tente novamente.",
-      );
-    } finally {
-      setTemplateLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Busca única no mount. As chamadas de setState de loadTemplate ocorrem
-    // todas após `await` (assíncronas), então não há renders em cascata aqui;
-    // a regra não distingue esse caso.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadTemplate();
-  }, [loadTemplate]);
-
-  // F3: usado pelo botão "tentar novamente" (event handler — pode setar estado direto).
-  const retryLoadTemplate = () => {
-    setTemplateLoading(true);
-    setTemplateError("");
-    loadTemplate();
-  };
-
-  const handleInputChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    const newValue = type === "checkbox" ? checked : value;
-
-    if (name === "createProject") {
-      setCreateProjectPref(checked);
-    }
-
-    // F9: título é estado derivado; só para de derivar enquanto houver texto manual.
-    let titleCustomized = isTitleCustomized;
-    if (name === "projectTitle") {
-      titleCustomized = value.trim() !== "";
-      setIsTitleCustomized(titleCustomized);
-    }
-
-    setFormData((prev) => {
-      const next = { ...prev, [name]: newValue };
-      if (
-        !titleCustomized &&
-        (name === "owner" || name === "repo" || name === "projectTitle")
-      ) {
-        next.projectTitle = deriveProjectTitle(next.owner, next.repo);
-      }
-      return next;
-    });
-  };
-
-  // --- Handlers de Milestones ---
-  const handleMilestoneChange = (index, field, value) => {
-    const list = [...formData.milestones];
-    list[index][field] = value;
-    setFormData({ ...formData, milestones: list });
-  };
-
-  const addMilestone = () => {
-    const nextKey = `M${formData.milestones.length + 1}`;
-    setFormData({
-      ...formData,
-      milestones: [
-        ...formData.milestones,
-        {
-          key: nextKey,
-          title: `${nextKey} - Novo Marco`,
-          description: "",
-          value: 1,
-          unit: "months",
-        },
-      ],
-    });
-  };
-
-  const removeMilestone = (index) => {
-    setFormData({
-      ...formData,
-      milestones: formData.milestones.filter((_, i) => i !== index),
-    });
-  };
-
-  // --- Handlers de Labels ---
-  const handleLabelChange = (index, field, value) => {
-    const list = [...formData.labels];
-    list[index][field] = value;
-    setFormData({ ...formData, labels: list });
-  };
-
-  const addLabel = () => {
-    setFormData({
-      ...formData,
-      labels: [
-        ...formData.labels,
-        { name: "nova:label", color: "#0052CC", description: "" },
-      ],
-    });
-  };
-
-  const removeLabel = (index) => {
-    setFormData({
-      ...formData,
-      labels: formData.labels.filter((_, i) => i !== index),
-    });
-  };
-
-  // --- Handlers de Issues ---
-  const handleIssueChange = (index, field, value) => {
-    const list = [...formData.issues];
-    list[index][field] = value;
-    setFormData({ ...formData, issues: list });
-  };
-
-  const handleIssueArrayChange = (issueIndex, arrayField, itemIndex, value) => {
-    const list = [...formData.issues];
-    list[issueIndex][arrayField][itemIndex] = value;
-    setFormData({ ...formData, issues: list });
-  };
-
-  const addIssueItem = (issueIndex, arrayField) => {
-    const list = [...formData.issues];
-    list[issueIndex][arrayField].push("");
-    setFormData({ ...formData, issues: list });
-  };
-
-  const removeIssueItem = (issueIndex, arrayField, itemIndex) => {
-    const list = [...formData.issues];
-    list[issueIndex][arrayField] = list[issueIndex][arrayField].filter(
-      (_, i) => i !== itemIndex,
-    );
-    setFormData({ ...formData, issues: list });
-  };
-
-  const handleToggleIssueLabel = (issueIndex, labelName) => {
-    const list = [...formData.issues];
-    const currentLabels = list[issueIndex].labels || [];
-
-    if (currentLabels.includes(labelName)) {
-      list[issueIndex].labels = currentLabels.filter((l) => l !== labelName);
-    } else {
-      list[issueIndex].labels = [...currentLabels, labelName];
-    }
-
-    setFormData({ ...formData, issues: list });
-  };
-
-  const addIssue = () => {
-    setFormData({
-      ...formData,
-      issues: [
-        ...formData.issues,
-        {
-          title: "[Atividade] Nova Atividade",
-          milestone: formData.milestones[0]?.key || "M1",
-          labels: [],
-          description: "",
-          entregaveis: [""],
-          criterios_aceite: [""],
-        },
-      ],
-    });
-  };
-
-  const removeIssue = (index) => {
-    setFormData({
-      ...formData,
-      issues: formData.issues.filter((_, i) => i !== index),
-    });
-  };
-
-  const nextStep = () => setStep((prev) => prev + 1);
-  const prevStep = () => setStep((prev) => prev - 1);
-
-  // Submissão formatando para a API
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setMessage("");
-    setResult(null);
-
-    const milestone_durations = {};
-    formData.milestones.forEach((m) => {
-      milestone_durations[m.key] = {
-        value: parseInt(m.value, 10) || 1,
-        unit: m.unit,
-      };
-    });
-
-    const formattedLabels = formData.labels.map((l) => ({
-      name: l.name,
-      color: l.color.replace("#", ""),
-      description: l.description,
-    }));
-
-    const formattedMilestones = formData.milestones.map((m) => ({
-      key: m.key,
-      title: m.title,
-      description: m.description,
-    }));
-
-    const hasProjectNumber = Boolean(
-      formData.projectNumber && parseInt(formData.projectNumber, 10) > 0,
-    );
-
-    const payload = {
-      owner: formData.owner,
-      repo: formData.repo,
-      apply: formData.apply,
-      create_project: hasProjectNumber ? false : formData.createProject,
-      project_title: formData.projectTitle,
-      project_number: hasProjectNumber
-        ? parseInt(formData.projectNumber, 10)
-        : null,
-      project_start_date: formData.projectStartDate,
-      config: {
-        schedule: {
-          project_start_date: formData.projectStartDate,
-          project_date_fields: {
-            start: "Início previsto",
-            end: "Fim previsto",
-          },
-          milestone_durations: milestone_durations,
-        },
-        labels: formattedLabels,
-        milestones: formattedMilestones,
-        issues: formData.issues,
-      },
-    };
-
-    try {
-      const response = await fetch(`${API_BASE}/api/build-roadmap`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "github-token": formData.githubToken,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail || "Erro ao processar roadmap");
-      }
-
-      // F1: o backend pode responder sucesso total ou parcial (ex.: issues
-      // criadas mas o Project falhou por falta de escopo no token).
-      setResult(data);
-      const issuesCount = (data.issues_created || []).length;
-      if (data.status === "partial") {
-        setMessage(
-          `Parcial: ${issuesCount} issue(s) criada(s). A etapa do painel de projeto não foi concluída. ` +
-            (data.project_error || ""),
-        );
-      } else {
-        setMessage(
-          `Sucesso! Roadmap aplicado com ${issuesCount || formData.issues.length} issue(s).`,
-        );
-      }
-    } catch (error) {
-      setMessage(`Erro: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!started) {
-    return (
-      <div className="welcome-screen">
-        <div className="welcome-content">
-          <img
-            src="/roadmap.png"
-            alt="Roadmap Builder Logo"
-            className="welcome-logo"
-          />
-          <span className="welcome-tag">RoadMap Builder</span>
-          <h1>Construa Roadmaps Inteligentes para o GitHub</h1>
-          <p>
-            Automatize a criação de marcos, etiquetas, cronogramas e painéis de
-            projeto diretamente no seu repositório com uma experiência fluida,
-            estruturada e integrada.
-          </p>
-          <button
-            onClick={() => setStarted(true)}
-            className="btn-welcome-start"
-          >
-            Começar a Construir ➔
-          </button>
-        </div>
-      </div>
-    );
-  }
-
+function OrgSwitcher() {
+  const { orgs, current, setCurrent } = useOrg();
+  if (!orgs.length) return null;
   return (
-    <div className="app-wrapper">
-      <div className="form-container-wrapper">
-        <button onClick={() => setStarted(false)} className="btn-top-welcome">
-          ← Voltar a Página Apresentação
-        </button>
-
-        <div className="container">
-          <div className="stepper">
-            {[
-              "Início",
-              "Durações",
-              "Labels",
-              "Marcos",
-              "Issues",
-              "Revisão",
-            ].map((labelName, i) => {
-              const num = i + 1;
-              return (
-                <div
-                  key={num}
-                  className={`step ${step >= num ? "active" : ""}`}
-                >
-                  <div className="step-circle">{num}</div>
-                  <div className="step-label">{labelName}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="form-content">
-            {/* F3: template não carregou — aviso visível + tentar novamente */}
-            {templateError && (
-              <div className="message error" style={{ marginBottom: "16px" }}>
-                {templateError}
-                <div style={{ marginTop: "8px" }}>
-                  <button
-                    type="button"
-                    onClick={retryLoadTemplate}
-                    className="btn-secondary"
-                    disabled={templateLoading}
-                  >
-                    {templateLoading ? "Carregando..." : "Tentar novamente"}
-                  </button>
-                </div>
-              </div>
-            )}
-            {templateLoading && !templateError && (
-              <div className="message" style={{ marginBottom: "16px" }}>
-                Carregando modelo de backlog do servidor...
-              </div>
-            )}
-
-            {/* PASSO 1 */}
-            {step === 1 && (
-              <div className="step-panel">
-                <h2>Configurações Iniciais</h2>
-                <div className="form-group">
-                  <label>Token do GitHub (Classic) *</label>
-                  <input
-                    type="password"
-                    name="githubToken"
-                    value={formData.githubToken}
-                    onChange={handleInputChange}
-                    placeholder="ghp_..."
-                  />
-                  {/* F7: escopos necessários */}
-                  <small
-                    style={{
-                      color: "#666",
-                      fontSize: "0.8rem",
-                      marginTop: "4px",
-                      display: "block",
-                    }}
-                  >
-                    Escopos necessários no token: <code>repo</code> e, para
-                    criar ou vincular painéis (Projects V2),{" "}
-                    <code>project</code>.
-                  </small>
-                </div>
-                <div className="row">
-                  <div className="form-group">
-                    <label>Owner *</label>
-                    <input
-                      type="text"
-                      name="owner"
-                      value={formData.owner}
-                      onChange={handleInputChange}
-                      placeholder="Ex: JuanPabloFAC"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Repositório *</label>
-                    <input
-                      type="text"
-                      name="repo"
-                      value={formData.repo}
-                      onChange={handleInputChange}
-                      placeholder="Ex: roadmap3"
-                    />
-                  </div>
-                </div>
-                <div className="row">
-                  <div className="form-group">
-                    <label>Título do Projeto</label>
-                    <input
-                      type="text"
-                      name="projectTitle"
-                      value={formData.projectTitle}
-                      onChange={handleInputChange}
-                      placeholder="Ex: owner/repo - Roadmap"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Data de Início</label>
-                    <input
-                      type="date"
-                      name="projectStartDate"
-                      value={formData.projectStartDate}
-                      onChange={handleInputChange}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group" style={{ marginTop: "10px" }}>
-                  <label>Número de um Project existente (Opcional)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    name="projectNumber"
-                    value={formData.projectNumber}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFormData((prev) => ({
-                        ...prev,
-                        projectNumber: val,
-                        // F2: ao preencher, desativa "criar painel"; ao limpar,
-                        // restaura a preferência explícita do usuário.
-                        createProject: val ? false : createProjectPref,
-                      }));
-                    }}
-                    placeholder="Ex: 3 (deixe em branco para criar um novo projeto)"
-                  />
-                  <small
-                    style={{
-                      color: "#666",
-                      fontSize: "0.8rem",
-                      marginTop: "4px",
-                    }}
-                  >
-                    Se informado, as issues serão vinculadas a este projeto
-                    existente em vez de criar um novo.
-                  </small>
-                </div>
-              </div>
-            )}
-
-            {/* PASSO 2 */}
-            {step === 2 && (
-              <div className="step-panel">
-                <h2>Durações dos Marcos (Milestones Durations)</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Defina o identificador e o tempo de duração de cada marco para
-                  o cálculo automático do cronograma.
-                </p>
-                {formData.milestones.map((m, index) => (
-                  <div key={index} className="dynamic-row">
-                    <input
-                      type="text"
-                      value={m.key}
-                      onChange={(e) =>
-                        handleMilestoneChange(index, "key", e.target.value)
-                      }
-                      placeholder="Ex: M1"
-                      className="short-input"
-                    />
-                    <input
-                      type="number"
-                      min="1"
-                      value={m.value}
-                      onChange={(e) =>
-                        handleMilestoneChange(index, "value", e.target.value)
-                      }
-                      className="short-input"
-                    />
-                    <select
-                      value={m.unit}
-                      onChange={(e) =>
-                        handleMilestoneChange(index, "unit", e.target.value)
-                      }
-                    >
-                      <option value="days">Dias</option>
-                      <option value="months">Meses</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => removeMilestone(index)}
-                      className="btn-remove"
-                      style={{
-                        visibility:
-                          formData.milestones.length === 1
-                            ? "hidden"
-                            : "visible",
-                      }}
-                    >
-                      X
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addMilestone}
-                  className="btn-secondary"
-                  style={{ marginTop: "10px" }}
-                >
-                  + Adicionar Duração
-                </button>
-              </div>
-            )}
-
-            {/* PASSO 3 */}
-            {step === 3 && (
-              <div className="step-panel">
-                <h2>Etiquetas (Labels)</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Configure o nome, a cor de identificação e a descrição de cada
-                  label.
-                </p>
-                {formData.labels.map((l, index) => (
-                  <div key={index} className="label-row">
-                    <input
-                      type="text"
-                      value={l.name}
-                      onChange={(e) =>
-                        handleLabelChange(index, "name", e.target.value)
-                      }
-                      placeholder="Ex: fase:i"
-                      className="label-name-input"
-                    />
-                    <div className="color-picker-wrapper">
-                      <input
-                        type="color"
-                        value={
-                          l.color.startsWith("#") ? l.color : `#${l.color}`
-                        }
-                        onChange={(e) =>
-                          handleLabelChange(index, "color", e.target.value)
-                        }
-                      />
-                      <input
-                        type="text"
-                        value={l.color}
-                        onChange={(e) =>
-                          handleLabelChange(index, "color", e.target.value)
-                        }
-                        placeholder="#1D76DB"
-                        className="color-text-input"
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={l.description}
-                      onChange={(e) =>
-                        handleLabelChange(index, "description", e.target.value)
-                      }
-                      placeholder="Descrição da label"
-                      className="label-desc-input"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeLabel(index)}
-                      className="btn-remove"
-                      style={{
-                        visibility:
-                          formData.labels.length === 1 ? "hidden" : "visible",
-                      }}
-                    >
-                      X
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addLabel}
-                  className="btn-secondary"
-                  style={{ marginTop: "10px" }}
-                >
-                  + Adicionar Label
-                </button>
-              </div>
-            )}
-
-            {/* PASSO 4 */}
-            {step === 4 && (
-              <div className="step-panel">
-                <h2>Marcos do Projeto (Milestones)</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Defina os detalhes de título e descrição de cada marco do
-                  roadmap.
-                </p>
-                {formData.milestones.map((m, index) => (
-                  <div key={index} className="milestone-card">
-                    <div className="milestone-top-row">
-                      <input
-                        type="text"
-                        value={m.key}
-                        onChange={(e) =>
-                          handleMilestoneChange(index, "key", e.target.value)
-                        }
-                        placeholder="Chave"
-                        className="milestone-key-input"
-                      />
-                      <input
-                        type="text"
-                        value={m.title}
-                        onChange={(e) =>
-                          handleMilestoneChange(index, "title", e.target.value)
-                        }
-                        placeholder="Título do Marco (ex: M1 - Exploração)"
-                        className="milestone-title-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeMilestone(index)}
-                        className="btn-remove"
-                        style={{
-                          visibility:
-                            formData.milestones.length === 1
-                              ? "hidden"
-                              : "visible",
-                        }}
-                      >
-                        X
-                      </button>
-                    </div>
-                    <div className="milestone-desc-row">
-                      <textarea
-                        rows="2"
-                        value={m.description}
-                        onChange={(e) =>
-                          handleMilestoneChange(
-                            index,
-                            "description",
-                            e.target.value,
-                          )
-                        }
-                        placeholder="Descrição detalhada do marco..."
-                        className="milestone-textarea"
-                      />
-                    </div>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addMilestone}
-                  className="btn-secondary"
-                  style={{ marginTop: "10px" }}
-                >
-                  + Adicionar Milestone
-                </button>
-              </div>
-            )}
-
-            {/* PASSO 5 */}
-            {step === 5 && (
-              <div className="step-panel">
-                <h2>Issues e Entregáveis</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Cadastre as atividades, entregáveis e critérios de aceite
-                  vinculados aos marcos.
-                </p>
-
-                <div className="issues-scroll-container">
-                  {formData.issues.map((iss, issIndex) => (
-                    <div key={issIndex} className="issue-card-box">
-                      <div className="issue-top-row">
-                        <input
-                          type="text"
-                          value={iss.title}
-                          onChange={(e) =>
-                            handleIssueChange(issIndex, "title", e.target.value)
-                          }
-                          placeholder="Título da Issue (ex: [Atividade] ...)"
-                          className="issue-title-input"
-                        />
-                        <select
-                          value={iss.milestone}
-                          onChange={(e) =>
-                            handleIssueChange(
-                              issIndex,
-                              "milestone",
-                              e.target.value,
-                            )
-                          }
-                          className="issue-milestone-select"
-                        >
-                          {formData.milestones.map((m) => (
-                            <option key={m.key} value={m.key}>
-                              {m.key}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => removeIssue(issIndex)}
-                          className="btn-remove"
-                        >
-                          X
-                        </button>
-                      </div>
-
-                      <div className="issue-desc-row">
-                        <textarea
-                          rows="2"
-                          value={iss.description}
-                          onChange={(e) =>
-                            handleIssueChange(
-                              issIndex,
-                              "description",
-                              e.target.value,
-                            )
-                          }
-                          placeholder="Descrição detalhada da issue..."
-                          className="issue-textarea"
-                        />
-                      </div>
-
-                      {/* Seção de Labels */}
-                      <div className="sub-section">
-                        <label className="sub-section-title">
-                          Etiquetas (Labels):
-                        </label>
-                        <div className="issue-labels-wrapper">
-                          {formData.labels.map((lbl) => {
-                            const isSelected = (iss.labels || []).includes(
-                              lbl.name,
-                            );
-                            const colorHex = lbl.color.startsWith("#")
-                              ? lbl.color
-                              : `#${lbl.color}`;
-                            return (
-                              <button
-                                key={lbl.name}
-                                type="button"
-                                onClick={() =>
-                                  handleToggleIssueLabel(issIndex, lbl.name)
-                                }
-                                className={`chip-label ${isSelected ? "selected" : ""}`}
-                                style={{
-                                  backgroundColor: isSelected
-                                    ? colorHex
-                                    : "#f0f2f5",
-                                  color: isSelected ? "#ffffff" : "#444444",
-                                  borderColor: colorHex,
-                                }}
-                              >
-                                {lbl.name} {isSelected ? "✓" : "+"}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="sub-section">
-                        <label className="sub-section-title">
-                          Entregáveis:
-                        </label>
-                        {iss.entregaveis.map((ent, eIdx) => (
-                          <div key={eIdx} className="sub-row">
-                            <input
-                              type="text"
-                              value={ent}
-                              onChange={(e) =>
-                                handleIssueArrayChange(
-                                  issIndex,
-                                  "entregaveis",
-                                  eIdx,
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Ex: Ata das oficinas..."
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                removeIssueItem(issIndex, "entregaveis", eIdx)
-                              }
-                              className="btn-remove-sm"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => addIssueItem(issIndex, "entregaveis")}
-                          className="btn-text"
-                        >
-                          + Adicionar Entregável
-                        </button>
-                      </div>
-
-                      <div className="sub-section">
-                        <label className="sub-section-title">
-                          Critérios de Aceite:
-                        </label>
-                        {iss.criterios_aceite.map((crit, cIdx) => (
-                          <div key={cIdx} className="sub-row">
-                            <input
-                              type="text"
-                              value={crit}
-                              onChange={(e) =>
-                                handleIssueArrayChange(
-                                  issIndex,
-                                  "criterios_aceite",
-                                  cIdx,
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Ex: Órgão demandante valida..."
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                removeIssueItem(
-                                  issIndex,
-                                  "criterios_aceite",
-                                  cIdx,
-                                )
-                              }
-                              className="btn-remove-sm"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            addIssueItem(issIndex, "criterios_aceite")
-                          }
-                          className="btn-text"
-                        >
-                          + Adicionar Critério
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={addIssue}
-                  className="btn-secondary"
-                  style={{ marginTop: "15px" }}
-                >
-                  + Adicionar Nova Issue
-                </button>
-              </div>
-            )}
-
-            {/* PASSO 6 */}
-            {step === 6 && (
-              <div className="step-panel">
-                <h2>Revisão e Confirmação</h2>
-                <div className="summary-box">
-                  <p>
-                    <strong>Repositório:</strong> {formData.owner}/
-                    {formData.repo}
-                  </p>
-                  <p>
-                    <strong>Painel de Projeto:</strong>{" "}
-                    {formData.projectNumber
-                      ? `Vincular ao Project existente #${formData.projectNumber}`
-                      : formData.createProject
-                        ? `Criar novo painel "${formData.projectTitle}"`
-                        : "Nenhum projeto vinculado"}
-                  </p>
-                  <p>
-                    <strong>Total de Milestones:</strong>{" "}
-                    {formData.milestones.length}
-                  </p>
-                  <p>
-                    <strong>Total de Labels:</strong> {formData.labels.length}
-                  </p>
-                  <p>
-                    <strong>Total de Issues:</strong> {formData.issues.length}
-                  </p>
-                </div>
-
-                <div className="checkbox-group">
-                  <label>
-                    <input
-                      type="checkbox"
-                      name="apply"
-                      checked={formData.apply}
-                      onChange={handleInputChange}
-                    />{" "}
-                    Aplicar no GitHub
-                  </label>
-
-                  <label
-                    style={{
-                      opacity: formData.projectNumber ? 0.5 : 1,
-                      cursor: formData.projectNumber
-                        ? "not-allowed"
-                        : "pointer",
-                    }}
-                    title={
-                      formData.projectNumber
-                        ? "Desabilitado: você informou o número de um Project existente no Passo 1."
-                        : ""
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      name="createProject"
-                      disabled={Boolean(formData.projectNumber)}
-                      checked={
-                        formData.projectNumber ? false : formData.createProject
-                      }
-                      onChange={handleInputChange}
-                    />{" "}
-                    Criar Painel de Projeto (Projects V2)
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {/* Mensagem de Feedback */}
-            {message && (
-              <div
-                className={`message ${
-                  message.includes("Erro") ? "error" : "success"
-                }`}
-              >
-                {message}
-              </div>
-            )}
-
-            {/* F1: detalhamento do que foi efetivamente criado */}
-            {result && (
-              <div className="summary-box" style={{ marginTop: "12px" }}>
-                <p>
-                  <strong>Status:</strong>{" "}
-                  {result.status === "partial" ? "Parcial" : "Concluído"}
-                </p>
-                <p>
-                  <strong>Issues criadas:</strong>{" "}
-                  {(result.issues_created || []).length}
-                </p>
-                {result.project_error && (
-                  <p style={{ color: "#b00020" }}>
-                    <strong>Painel de projeto:</strong> {result.project_error}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Ações */}
-            <div
-              className="form-actions"
-              style={{
-                marginTop: "24px",
-                display: "flex",
-                justifyContent: "space-between",
-              }}
-            >
-              {step > 1 && (
-                <button
-                  type="button"
-                  onClick={prevStep}
-                  className="btn-secondary"
-                >
-                  Voltar
-                </button>
-              )}
-              {step === 1 && <div />}
-
-              {step < 6 && (
-                <button
-                  type="button"
-                  onClick={nextStep}
-                  className="btn-primary"
-                >
-                  Próximo
-                </button>
-              )}
-              {step === 6 && (
-                <div style={{ textAlign: "right" }}>
-                  <button
-                    onClick={handleSubmit}
-                    disabled={loading}
-                    className="btn-success"
-                  >
-                    {loading
-                      ? "Processando... (pode levar alguns minutos)"
-                      : "Finalizar e Enviar"}
-                  </button>
-                  {formData.apply && (
-                    <div
-                      style={{
-                        color: "#666",
-                        fontSize: "0.8rem",
-                        marginTop: "6px",
-                      }}
-                    >
-                      As issues são criadas uma a uma na API do GitHub; para
-                      backlogs grandes isso leva alguns minutos.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+    <select
+      className="org-switcher"
+      value={current?.login || ""}
+      onChange={(e) => setCurrent(e.target.value)}
+      title="Organização (tenant). O primeiro item é sua conta pessoal."
+    >
+      {orgs.map((o) => (
+        <option key={o.login} value={o.login}>
+          {o.login}
+          {o.personal ? " (pessoal)" : o.is_coordinator ? " (coord.)" : ""}
+        </option>
+      ))}
+    </select>
   );
 }
 
-export default App;
+function Header() {
+  const { user, logout } = useAuth();
+  const { current, isCoordinator } = useOrg();
+  if (!user) return null;
+  return (
+    <header className="app-header">
+      <Link to="/" className="app-brand">
+        RoadMap Builder
+      </Link>
+      <nav className="app-nav">
+        <Link to="/" title="Seus projetos de roadmap">
+          Projetos
+        </Link>
+        <Link to="/projects/new" title="Provisionar um novo repositório">
+          Novo
+        </Link>
+        {current && (
+          <Link
+            to="/dashboards/my"
+            title="Issues em que você é autor ou responsável"
+          >
+            Minhas issues
+          </Link>
+        )}
+        {current && (
+          <Link
+            to="/dashboards/org"
+            title="Todas as issues dos projetos da organização"
+          >
+            Issues da org
+          </Link>
+        )}
+        {current && (
+          <Link
+            to="/dashboards/board"
+            title="Board (colunas) das issues que existem no GitHub — visão de gestão consolidada"
+          >
+            Board
+          </Link>
+        )}
+        {current && isCoordinator && (
+          <Link
+            to="/dashboards/devs"
+            title="Progresso por desenvolvedor e por fase (coordenador)"
+          >
+            Devs
+          </Link>
+        )}
+        <Link to="/profile" title="Seu PAT e configurações gerais">
+          Perfil
+        </Link>
+        <Link to="/manual" title="Como usar o RoadMap Builder">
+          Manual
+        </Link>
+      </nav>
+      <div className="app-user">
+        <OrgSwitcher />
+        {user.avatar_url && (
+          <img src={user.avatar_url} alt="" className="app-avatar" />
+        )}
+        <span>{user.login}</span>
+        <button className="btn-text" onClick={logout}>
+          Sair
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function Protected({ children }) {
+  return <RequireAuth>{children}</RequireAuth>;
+}
+
+export default function App() {
+  return (
+    <div className="app-root">
+      <Header />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <Protected>
+              <Home />
+            </Protected>
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            <Protected>
+              <Profile />
+            </Protected>
+          }
+        />
+        <Route
+          path="/manual"
+          element={
+            <Protected>
+              <Manual />
+            </Protected>
+          }
+        />
+        <Route
+          path="/projects/new"
+          element={
+            <Protected>
+              <ProjectWizard />
+            </Protected>
+          }
+        />
+        <Route
+          path="/projects/:id"
+          element={
+            <Protected>
+              <ProjectDetail />
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/my"
+          element={
+            <Protected>
+              <MyIssues />
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/org"
+          element={
+            <Protected>
+              <OrgIssues />
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/board"
+          element={
+            <Protected>
+              <Board />
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/devs"
+          element={
+            <Protected>
+              <Devs />
+            </Protected>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </div>
+  );
+}

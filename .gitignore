@@ -12,6 +12,10 @@ __pycache__/
 env/
 venv/
 
+# Banco local (dev)
+*.db
+*.sqlite3
+
 # Env files (não versionar segredos; use .env.example)
 .env
 .env.*

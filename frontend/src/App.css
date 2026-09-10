@@ -565,3 +565,542 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover {
   transform: translateY(-1px);
   filter: brightness(0.95);
 }
+
+/* --- Shell multiusuário (PR1) --- */
+.app-root {
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 24px;
+  background: #fff;
+  border-bottom: 1px solid #e3e6ea;
+}
+
+.app-brand {
+  font-weight: 800;
+  color: #1f2d3d;
+  text-decoration: none;
+}
+
+.app-nav {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+
+.app-nav a {
+  color: #4a5568;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.app-nav a:hover {
+  color: #1f2d3d;
+}
+
+.app-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #4a5568;
+}
+
+.app-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+}
+
+.page {
+  max-width: 900px;
+  margin: 32px auto;
+  padding: 0 24px;
+}
+
+.page-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  color: #666;
+}
+
+.home-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.home-actions a {
+  text-decoration: none;
+}
+
+/* --- Home / lista de projetos (PR2) --- */
+.home-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.project-card {
+  display: block;
+  padding: 16px;
+  border: 1px solid #e3e6ea;
+  border-radius: 10px;
+  background: #fff;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    box-shadow 0.15s,
+    transform 0.15s;
+}
+
+.project-card:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.project-card-title {
+  font-weight: 700;
+  color: #1f2d3d;
+  margin-bottom: 4px;
+}
+
+.project-card-repo {
+  font-size: 0.82rem;
+  color: #6b7684;
+  margin-bottom: 10px;
+}
+
+.project-card-stats {
+  display: flex;
+  gap: 12px;
+  font-size: 0.8rem;
+  color: #4a5568;
+  flex-wrap: wrap;
+}
+
+.project-card-stats.muted {
+  color: #b0392a;
+}
+
+.import-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 12px 0;
+  padding: 12px;
+  background: #f4f6f8;
+  border-radius: 8px;
+}
+
+.import-form input {
+  padding: 6px 10px;
+  border: 1px solid #cfd6dd;
+  border-radius: 6px;
+}
+
+.import-err {
+  color: #b0392a;
+  font-size: 0.82rem;
+}
+
+/* --- Detalhe do projeto (PR2) --- */
+.stat-row {
+  display: flex;
+  gap: 24px;
+  margin-top: 16px;
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat-num {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #1f2d3d;
+}
+
+.stat-label {
+  font-size: 0.78rem;
+  color: #6b7684;
+}
+
+.phase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.phase-row {
+  display: grid;
+  grid-template-columns: 220px 1fr 120px;
+  align-items: center;
+  gap: 12px;
+}
+
+.phase-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.phase-bar {
+  height: 10px;
+  background: #e9edf1;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.phase-bar-fill {
+  height: 100%;
+  background: #2f9e44;
+}
+
+.phase-counts {
+  font-size: 0.8rem;
+  color: #6b7684;
+  text-align: right;
+}
+
+/* --- Fases (PR3) --- */
+.phase-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+
+.alert-toggle {
+  font-size: 0.82rem;
+  color: #6b7684;
+}
+
+.phase-row.wide {
+  grid-template-columns: 1fr 130px 130px;
+}
+
+.phase-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.phase-badge.created {
+  background: #d3f9d8;
+  color: #2b8a3e;
+}
+
+.phase-badge.partial {
+  background: #fff3bf;
+  color: #a5730a;
+}
+
+.phase-badge.not_created {
+  background: #f1f3f5;
+  color: #868e96;
+}
+
+.phase-badge.empty {
+  background: #f1f3f5;
+  color: #adb5bd;
+}
+
+.history-list {
+  font-size: 0.85rem;
+  color: #4a5568;
+  padding-left: 18px;
+}
+
+.history-list li {
+  margin: 4px 0;
+}
+
+/* --- Dashboards / org (PR4) --- */
+.org-switcher {
+  padding: 4px 8px;
+  border: 1px solid #cfd6dd;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  background: #fff;
+}
+
+.issue-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+.issue-table th,
+.issue-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eceef1;
+  vertical-align: top;
+}
+
+.issue-table th {
+  color: #6b7684;
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.issue-table a {
+  color: #1f6feb;
+  text-decoration: none;
+}
+
+.issue-table a:hover {
+  text-decoration: underline;
+}
+
+/* --- Seletor de fases no wizard --- */
+.phase-picker {
+  margin-top: 16px;
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.phase-picker legend {
+  font-weight: 700;
+  color: #1f2d3d;
+  padding: 0 6px;
+}
+
+.phase-check {
+  display: block;
+  font-size: 0.9rem;
+  margin: 4px 0;
+  cursor: pointer;
+}
+
+.label-row .phase-badge {
+  white-space: nowrap;
+}
+
+.issue-top-row .phase-badge {
+  align-self: center;
+}
+
+/* link estilizado como botão */
+a.btn-primary,
+a.btn-secondary,
+a.btn-success {
+  display: inline-block;
+  text-decoration: none;
+  line-height: normal;
+}
+
+/* --- Abas de fase na etapa de issues --- */
+.issue-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  border-bottom: 2px solid #e3e6ea;
+  margin-bottom: 12px;
+}
+
+.issue-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  padding: 8px 14px;
+  font-weight: 700;
+  color: #6b7684;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+}
+
+.issue-tab:hover {
+  background: #f4f6f8;
+}
+
+.issue-tab.active {
+  background: transparent;
+  color: #1f6feb;
+  border-bottom-color: #1f6feb;
+}
+
+.issue-tab:focus {
+  outline: none;
+  background: #eef4ff;
+}
+
+.issue-tab-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #e9edf1;
+  color: #4a5568;
+  font-size: 0.72rem;
+  line-height: 18px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.issue-tab.active .issue-tab-count {
+  background: #1f6feb;
+  color: #fff;
+}
+
+/* --- Manual do usuário --- */
+.manual {
+  max-width: 760px;
+  line-height: 1.6;
+}
+.manual h2 {
+  margin-top: 28px;
+  font-size: 1.15rem;
+  color: #1f2d3d;
+}
+.manual ul,
+.manual ol {
+  padding-left: 22px;
+}
+.manual li {
+  margin: 6px 0;
+}
+.manual code {
+  background: #f1f3f5;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.88em;
+}
+
+/* --- Board (colunas) --- */
+.board-page {
+  max-width: none;
+}
+.board-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  margin: 8px 0 4px;
+}
+.board-controls select {
+  padding: 4px 8px;
+  max-width: 190px;
+  border: 1px solid #cfd6dd;
+  border-radius: 6px;
+}
+.board {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  align-items: flex-start;
+}
+.board-col {
+  flex: 0 0 300px;
+  background: #f1f3f5;
+  border-radius: 10px;
+  max-height: calc(100vh - 220px);
+  display: flex;
+  flex-direction: column;
+}
+.board-col-head {
+  padding: 10px 12px;
+  font-weight: 800;
+  color: #1f2d3d;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.board-col-count {
+  background: #dfe4ea;
+  color: #4a5568;
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 0.78rem;
+}
+.board-col-body {
+  padding: 0 10px 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.board-card {
+  display: block;
+  background: #fff;
+  border: 1px solid #e3e6ea;
+  border-radius: 8px;
+  padding: 10px;
+  text-decoration: none;
+  color: inherit;
+}
+.board-card:hover {
+  border-color: #1f6feb;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+.board-card-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.35;
+  margin-bottom: 6px;
+}
+.board-card-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 0.72rem;
+}
+.board-card-repo {
+  color: #6b7684;
+  font-weight: 700;
+}
+.board-assignee {
+  color: #1f6feb;
+}
+.board-card-labels {
+  margin-top: 6px;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.board-label {
+  background: #eef1f4;
+  color: #5a6472;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.68rem;
+}
+.board-empty {
+  color: #adb5bd;
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 8px 0;
+}

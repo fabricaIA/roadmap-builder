@@ -2,7 +2,53 @@
 
 Gera milestones, issues e roadmap executável no GitHub para o plano de execução do processo da Fábrica.
 
-## Automação para criar quadro, milestones e issues no GitHub
+## Aplicação web (multiusuário)
+
+Além da CLI, há uma aplicação web (`backend/app` + `frontend/`) com login via GitHub
+OAuth. Cada usuário guarda o próprio **PAT** e configurações no perfil; o roadmap é
+criado com esse PAT.
+
+### Pré-requisitos
+
+1. **OAuth App do GitHub** (Settings → Developer settings → OAuth Apps).
+   Authorization callback URL (dev): `http://localhost:8000/api/auth/github/callback`.
+2. Copie `.env.example` para `.env` e preencha `GITHUB_OAUTH_CLIENT_ID/SECRET`,
+   `SESSION_SECRET` e `PAT_ENCRYPTION_KEY`:
+   ```bash
+   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+
+### Rodar (dev)
+
+```bash
+# backend
+python -m pip install -r requirements-dev.txt
+alembic upgrade head                       # cria/atualiza o banco (SQLite por padrão)
+uvicorn backend.app.main:app --reload --port 8000
+
+# frontend (outro terminal) — o Vite faz proxy de /api para :8000
+cd frontend && npm install && npm run dev
+```
+
+Abra `http://localhost:5173`, entre com o GitHub, configure o PAT no perfil
+(`repo` + `project`) e crie o roadmap pelo wizard.
+
+### Multi-tenant e dashboards
+
+O tenant é a **organização do GitHub**: no login (escopo `read:org`) o app
+sincroniza suas orgs e o papel (`admin` → coordenador, `member` → dev).
+Selecione a org no cabeçalho. Cada usuário vê:
+
+- **Minhas issues** — issues (autor/assignee) nos projetos de roadmap da org.
+- **Issues da organização** — todas as issues dos projetos da org.
+- **Devs** (só coordenador) — progresso por desenvolvedor e por fase.
+
+Os números são buscados live no GitHub (cache de 60s). Se o PAT não tiver
+`read:org`, sincronize manualmente pelo perfil.
+
+Testes do backend: `pytest`.
+
+## Automação por linha de comando (CLI)
 
 Para facilitar a criação do **Project (quadro)**, **milestones** e **issues**, este repositório inclui:
 
@@ -22,6 +68,21 @@ python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO>
 export GITHUB_TOKEN=<SEU_TOKEN>
 python3 scripts/roadmap_builder.py --owner <OWNER_REPO> --repo <NOME_REPO> --apply
 ```
+
+### Criar apenas as issues de uma fase
+
+`--phase` cria só as issues do milestone indicado (repita para várias). As
+milestones e labels continuam sendo garantidas por inteiro. É idempotente:
+reexecutar não duplica issues (as existentes são atualizadas).
+
+```bash
+python3 scripts/roadmap_builder.py --owner <OWNER> --repo <REPO> --apply --phase M1
+# depois:
+python3 scripts/roadmap_builder.py --owner <OWNER> --repo <REPO> --apply --phase M2
+```
+
+Na aplicação web isso aparece no detalhe do projeto (botão "Aplicar Fase" por
+fase, com aviso ou no-op quando a fase já existe).
 
 ### Definir cronograma estimado
 
