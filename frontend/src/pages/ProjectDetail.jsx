@@ -133,7 +133,10 @@ export default function ProjectDetail() {
 
       <div className="phase-head">
         <h2>Fases</h2>
-        <label className="alert-toggle">
+        <label
+          className="alert-toggle"
+          title="Marcado: reaplicar uma fase completa retorna erro. Desmarcado: é ignorado (no-op)."
+        >
           <input
             type="checkbox"
             checked={alertMode}
@@ -175,6 +178,7 @@ export default function ProjectDetail() {
                 className="btn-secondary"
                 disabled={busyPhase === ph.phase}
                 onClick={() => applyPhase(ph.phase)}
+                title={`Cria as issues da fase ${ph.phase} no repositório (idempotente: não duplica as que já existem).`}
               >
                 {busyPhase === ph.phase ? "Aplicando…" : "Aplicar Fase"}
               </button>

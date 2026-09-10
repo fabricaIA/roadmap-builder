@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { useAuth } from "../auth/useAuth";
 
@@ -88,6 +88,7 @@ function ProjectCard({ p }) {
 
 export default function Home() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [projects, setProjects] = useState(null);
   const [error, setError] = useState("");
   const [showImport, setShowImport] = useState(false);
@@ -112,12 +113,19 @@ export default function Home() {
       <div className="home-head">
         <h1>Projetos</h1>
         <div className="home-actions">
-          <Link to="/projects/new" className="btn-primary">
-            ＋ Novo projeto
-          </Link>
           <button
+            type="button"
+            className="btn-primary"
+            onClick={() => navigate("/projects/new")}
+            title="Provisiona um repositório do zero: milestones, labels e issues do template (você escolhe as fases)."
+          >
+            ＋ Novo projeto
+          </button>
+          <button
+            type="button"
             className="btn-secondary"
             onClick={() => setShowImport((v) => !v)}
+            title="Cadastra no app um repositório que já tem o roadmap criado, para acompanhar aqui e nos dashboards."
           >
             Importar existente
           </button>

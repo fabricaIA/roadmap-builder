@@ -3,6 +3,7 @@ import { useAuth } from "./auth/useAuth";
 import { useOrg } from "./org/useOrg";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
+import Manual from "./pages/Manual";
 import Profile from "./pages/Profile";
 import ProjectDetail from "./pages/ProjectDetail";
 import ProjectWizard from "./pages/ProjectWizard";
@@ -48,12 +49,42 @@ function Header() {
         RoadMap Builder
       </Link>
       <nav className="app-nav">
-        <Link to="/">Projetos</Link>
-        <Link to="/projects/new">Novo</Link>
-        {current && <Link to="/dashboards/my">Minhas issues</Link>}
-        {current && <Link to="/dashboards/org">Issues da org</Link>}
-        {current && isCoordinator && <Link to="/dashboards/devs">Devs</Link>}
-        <Link to="/profile">Perfil</Link>
+        <Link to="/" title="Seus projetos de roadmap">
+          Projetos
+        </Link>
+        <Link to="/projects/new" title="Provisionar um novo repositório">
+          Novo
+        </Link>
+        {current && (
+          <Link
+            to="/dashboards/my"
+            title="Issues em que você é autor ou responsável"
+          >
+            Minhas issues
+          </Link>
+        )}
+        {current && (
+          <Link
+            to="/dashboards/org"
+            title="Todas as issues dos projetos da organização"
+          >
+            Issues da org
+          </Link>
+        )}
+        {current && isCoordinator && (
+          <Link
+            to="/dashboards/devs"
+            title="Progresso por desenvolvedor e por fase (coordenador)"
+          >
+            Devs
+          </Link>
+        )}
+        <Link to="/profile" title="Seu PAT e configurações gerais">
+          Perfil
+        </Link>
+        <Link to="/manual" title="Como usar o RoadMap Builder">
+          Manual
+        </Link>
       </nav>
       <div className="app-user">
         <OrgSwitcher />
@@ -92,6 +123,14 @@ export default function App() {
           element={
             <Protected>
               <Profile />
+            </Protected>
+          }
+        />
+        <Route
+          path="/manual"
+          element={
+            <Protected>
+              <Manual />
             </Protected>
           }
         />

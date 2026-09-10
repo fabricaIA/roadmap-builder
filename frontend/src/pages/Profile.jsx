@@ -108,6 +108,7 @@ export default function Profile() {
               value={patInput}
               onChange={(e) => setPatInput(e.target.value)}
               placeholder={hasPat ? "•••••••• (configurado)" : "ghp_..."}
+              title="Personal Access Token clássico do GitHub. Guardado cifrado; usado pelo backend nas operações."
             />
           </div>
 
@@ -118,6 +119,7 @@ export default function Profile() {
                 className="btn-secondary"
                 onClick={testPat}
                 disabled={busy}
+                title="Valida o PAT salvo contra a API do GitHub e mostra login + escopos."
               >
                 Testar PAT
               </button>
@@ -128,6 +130,7 @@ export default function Profile() {
                 className="btn-remove"
                 onClick={removePat}
                 disabled={busy}
+                title="Remove o PAT salvo. Você não conseguirá criar/atualizar roadmaps até definir outro."
               >
                 Remover PAT
               </button>

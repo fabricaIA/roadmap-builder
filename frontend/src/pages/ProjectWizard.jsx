@@ -20,6 +20,10 @@ function ProjectWizard() {
   const [templateError, setTemplateError] = useState("");
   // Fases (milestone keys) a criar agora. Todas por padrão.
   const [selectedPhases, setSelectedPhases] = useState([]);
+  // Nº de labels vindas do template — as adicionadas depois ficam sempre visíveis.
+  const [templateLabelCount, setTemplateLabelCount] = useState(0);
+  // Aba (fase) ativa na etapa de issues.
+  const [activeIssueTab, setActiveIssueTab] = useState("");
 
   const [formData, setFormData] = useState({
     owner: "",
@@ -65,6 +69,8 @@ function ProjectWizard() {
 
       setTemplateError("");
       setSelectedPhases(normalizedMilestones.map((m) => m.key));
+      setTemplateLabelCount(normalizedLabels.length);
+      setActiveIssueTab(normalizedMilestones[0]?.key || "");
       setFormData((prev) => ({
         ...prev,
         projectStartDate:
@@ -115,7 +121,10 @@ function ProjectWizard() {
   );
   const visibleLabels = formData.labels
     .map((l, i) => ({ l, i }))
-    .filter(({ l }) => usedLabelNames.has(l.name));
+    // labels usadas pelas fases selecionadas + as adicionadas manualmente
+    .filter(
+      ({ l, i }) => usedLabelNames.has(l.name) || i >= templateLabelCount,
+    );
   const labelPhases = (name) =>
     formData.milestones
       .filter((m) =>
@@ -124,6 +133,17 @@ function ProjectWizard() {
         ),
       )
       .map((m) => m.key);
+
+  // Abas da etapa de issues: fases selecionadas, na ordem dos marcos.
+  const tabPhases = formData.milestones
+    .map((m) => m.key)
+    .filter((k) => phaseSet.has(k));
+  const effectiveTab = tabPhases.includes(activeIssueTab)
+    ? activeIssueTab
+    : tabPhases[0] || "";
+  const tabIssues = visibleIssues.filter(
+    ({ iss }) => iss.milestone === effectiveTab,
+  );
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -154,13 +174,29 @@ function ProjectWizard() {
 
   // --- Handlers de Milestones ---
   const handleMilestoneChange = (index, field, value) => {
-    const list = [...formData.milestones];
+    const list = formData.milestones.map((m) => ({ ...m }));
+    const oldKey = list[index].key;
     list[index][field] = value;
+    // Renomear a chave propaga para as fases selecionadas e para as issues.
+    if (field === "key" && value !== oldKey) {
+      setSelectedPhases((prev) => prev.map((k) => (k === oldKey ? value : k)));
+      setActiveIssueTab((t) => (t === oldKey ? value : t));
+      const issues = formData.issues.map((iss) =>
+        iss.milestone === oldKey ? { ...iss, milestone: value } : iss,
+      );
+      setFormData({ ...formData, milestones: list, issues });
+      return;
+    }
     setFormData({ ...formData, milestones: list });
   };
 
   const addMilestone = () => {
-    const nextKey = `M${formData.milestones.length + 1}`;
+    const existing = new Set(formData.milestones.map((m) => m.key));
+    let n = formData.milestones.length + 1;
+    let nextKey = `M${n}`;
+    while (existing.has(nextKey)) nextKey = `M${++n}`;
+    setSelectedPhases((prev) => [...prev, nextKey]);
+    setActiveIssueTab(nextKey);
     setFormData({
       ...formData,
       milestones: [
@@ -246,13 +282,18 @@ function ProjectWizard() {
   };
 
   const addIssue = () => {
+    const phase =
+      activeIssueTab ||
+      selectedPhases[0] ||
+      formData.milestones[0]?.key ||
+      "M1";
     setFormData({
       ...formData,
       issues: [
         ...formData.issues,
         {
           title: "[Atividade] Nova Atividade",
-          milestone: selectedPhases[0] || formData.milestones[0]?.key || "M1",
+          milestone: phase,
           labels: [],
           description: "",
           entregaveis: [""],
@@ -515,7 +556,10 @@ function ProjectWizard() {
                   </small>
                 </div>
 
-                <fieldset className="phase-picker">
+                <fieldset
+                  className="phase-picker"
+                  title="Escolha quais fases provisionar agora. As demais ficam guardadas no projeto e podem ser aplicadas depois."
+                >
                   <legend>Fases a criar agora</legend>
                   <p
                     style={{
@@ -615,6 +659,7 @@ function ProjectWizard() {
                   onClick={addMilestone}
                   className="btn-secondary"
                   style={{ marginTop: "10px" }}
+                  title="Cria um novo marco (milestone). Ele já entra selecionado nas fases a criar."
                 >
                   + Adicionar Duração
                 </button>
@@ -701,6 +746,7 @@ function ProjectWizard() {
                   onClick={addLabel}
                   className="btn-secondary"
                   style={{ marginTop: "10px" }}
+                  title="Cria uma etiqueta nova. Ela fica sempre visível aqui; use os chips na etapa de Issues para aplicá-la."
                 >
                   + Adicionar Label
                 </button>
@@ -779,6 +825,7 @@ function ProjectWizard() {
                   onClick={addMilestone}
                   className="btn-secondary"
                   style={{ marginTop: "10px" }}
+                  title="Cria um novo marco (milestone) e o adiciona às fases a criar."
                 >
                   + Adicionar Milestone
                 </button>
@@ -794,15 +841,43 @@ function ProjectWizard() {
                   style={{
                     color: "#666",
                     fontSize: "0.9rem",
-                    marginBottom: "20px",
+                    marginBottom: "12px",
                   }}
                 >
                   Cadastre as atividades, entregáveis e critérios de aceite
-                  vinculados aos marcos.
+                  vinculados aos marcos. Uma aba por fase.
                 </p>
 
+                <div
+                  className="issue-tabs"
+                  role="tablist"
+                  title="Cada aba mostra as issues de uma fase (milestone)"
+                >
+                  {tabPhases.map((k) => {
+                    const count = formData.issues.filter(
+                      (i) => i.milestone === k,
+                    ).length;
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        className={`issue-tab ${k === effectiveTab ? "active" : ""}`}
+                        onClick={() => setActiveIssueTab(k)}
+                        title={`Ver e editar as issues da fase ${k}`}
+                      >
+                        {k} <span className="issue-tab-count">{count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
                 <div className="issues-scroll-container">
-                  {visibleIssues.map(({ iss, i: issIndex }) => (
+                  {tabIssues.length === 0 && (
+                    <p style={{ color: "#666" }}>
+                      Nenhuma issue nesta fase. Use “+ Adicionar Nova Issue”.
+                    </p>
+                  )}
+                  {tabIssues.map(({ iss, i: issIndex }) => (
                     <div key={issIndex} className="issue-card-box">
                       <div className="issue-top-row">
                         <span
@@ -989,6 +1064,7 @@ function ProjectWizard() {
                   onClick={addIssue}
                   className="btn-secondary"
                   style={{ marginTop: "15px" }}
+                  title={`Adiciona uma issue na fase ${effectiveTab || "atual"}`}
                 >
                   + Adicionar Nova Issue
                 </button>
@@ -1031,7 +1107,7 @@ function ProjectWizard() {
                 </div>
 
                 <div className="checkbox-group">
-                  <label>
+                  <label title="Desmarque para simular (dry-run): valida tudo sem criar nada no GitHub.">
                     <input
                       type="checkbox"
                       name="apply"
@@ -1051,7 +1127,7 @@ function ProjectWizard() {
                     title={
                       formData.projectNumber
                         ? "Desabilitado: você informou o número de um Project existente no Passo 1."
-                        : ""
+                        : "Cria também um painel Projects V2 no GitHub e adiciona as issues a ele."
                     }
                   >
                     <input
@@ -1109,6 +1185,7 @@ function ProjectWizard() {
                   type="button"
                   onClick={prevStep}
                   className="btn-secondary"
+                  title="Volta um passo (nada é perdido)"
                 >
                   Voltar
                 </button>
@@ -1121,6 +1198,11 @@ function ProjectWizard() {
                   onClick={nextStep}
                   className="btn-primary"
                   disabled={step === 1 && selectedPhases.length === 0}
+                  title={
+                    step === 1 && selectedPhases.length === 0
+                      ? "Selecione ao menos uma fase para continuar"
+                      : "Avança para o próximo passo"
+                  }
                 >
                   Próximo
                 </button>
@@ -1133,6 +1215,11 @@ function ProjectWizard() {
                       loading || !user?.has_pat || selectedPhases.length === 0
                     }
                     className="btn-success"
+                    title={
+                      !user?.has_pat
+                        ? "Configure um PAT no perfil antes de aplicar"
+                        : "Cria/registra o projeto e aplica as fases selecionadas"
+                    }
                   >
                     {loading
                       ? "Processando... (pode levar alguns minutos)"
