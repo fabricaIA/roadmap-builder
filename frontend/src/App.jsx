@@ -331,7 +331,7 @@ function App() {
       const issuesCount = (data.issues_created || []).length;
       if (data.status === "partial") {
         setMessage(
-          `Parcial: ${issuesCount} issue(s) criada(s), mas o painel de projeto não foi criado. ` +
+          `Parcial: ${issuesCount} issue(s) criada(s). A etapa do painel de projeto não foi concluída. ` +
             (data.project_error || ""),
         );
       } else {

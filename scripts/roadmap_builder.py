@@ -20,6 +20,7 @@ import json
 import os
 import ssl
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -30,6 +31,22 @@ API = "https://api.github.com"
 GRAPHQL = "https://api.github.com/graphql"
 DATE_FORMAT = "%Y-%m-%d"
 VALID_DURATION_UNITS = {"days", "months"}
+
+# A API de Projects V2 devolve erros transitorios (UNPROCESSABLE "temporary
+# conflict", limites secundarios) quando muitos itens sao adicionados em
+# sequencia. Repetimos com backoff exponencial antes de desistir.
+GRAPHQL_MAX_ATTEMPTS = 6
+GRAPHQL_RETRY_BASE_DELAY = 1.0
+GRAPHQL_RETRY_MAX_DELAY = 8.0
+PROJECT_ITEM_PACING = 0.25
+_TRANSIENT_MARKERS = (
+    "temporary conflict",
+    "please try again",
+    "try again later",
+    "was submitted too quickly",
+    "submitted too quickly",
+    "secondary rate limit",
+)
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -331,11 +348,47 @@ def request_json(method: str, url: str, token: str, payload: dict[str, Any] | No
         raise
 
 
+def _is_transient(text: str) -> bool:
+    low = text.lower()
+    return any(marker in low for marker in _TRANSIENT_MARKERS) or (
+        "http 50" in low  # 500/502/503/504 do endpoint GraphQL sob carga
+    )
+
+
 def graphql(token: str, query: str, variables: dict[str, Any]) -> dict[str, Any]:
-    data = request_json("POST", GRAPHQL, token, {"query": query, "variables": variables})
-    if "errors" in data:
-        raise RuntimeError(f"GraphQL erro: {data['errors']}")
-    return data["data"]
+    last_error = "erro desconhecido"
+    for attempt in range(1, GRAPHQL_MAX_ATTEMPTS + 1):
+        try:
+            data = request_json(
+                "POST", GRAPHQL, token, {"query": query, "variables": variables}
+            )
+        except RuntimeError as exc:
+            last_error = str(exc)
+            if attempt < GRAPHQL_MAX_ATTEMPTS and _is_transient(last_error):
+                delay = min(GRAPHQL_RETRY_BASE_DELAY * (2 ** (attempt - 1)), GRAPHQL_RETRY_MAX_DELAY)
+                print(
+                    f"[RETRY] GraphQL transitorio (tentativa {attempt}/{GRAPHQL_MAX_ATTEMPTS}): "
+                    f"{last_error[:120]} - aguardando {delay:.0f}s"
+                )
+                time.sleep(delay)
+                continue
+            raise
+
+        if "errors" not in data:
+            return data["data"]
+
+        last_error = f"GraphQL erro: {data['errors']}"
+        if attempt < GRAPHQL_MAX_ATTEMPTS and _is_transient(last_error):
+            delay = min(GRAPHQL_RETRY_BASE_DELAY * (2 ** (attempt - 1)), GRAPHQL_RETRY_MAX_DELAY)
+            print(
+                f"[RETRY] GraphQL transitorio (tentativa {attempt}/{GRAPHQL_MAX_ATTEMPTS}): "
+                f"{last_error[:120]} - aguardando {delay:.0f}s"
+            )
+            time.sleep(delay)
+            continue
+        raise RuntimeError(last_error)
+
+    raise RuntimeError(last_error)
 
 
 def ensure_milestones(
@@ -762,6 +815,7 @@ def update_project_dates(
             "[OK] Datas atualizadas no Project: "
             f"{title} ({iso_date(schedule['start_date'])} -> {iso_date(schedule['end_date'])})"
         )
+        time.sleep(PROJECT_ITEM_PACING)
 
 
 def add_issues_to_project(
@@ -801,6 +855,8 @@ def add_issues_to_project(
             if "already" not in str(exc).lower() and "existe" not in str(exc).lower():
                 raise
             print(f"[OK] Issue ja estava no project: {title}")
+        # Ritmo entre chamadas para reduzir os "temporary conflict" da API de Projects V2.
+        time.sleep(PROJECT_ITEM_PACING)
 
     update_project_dates(token, project_id, cfg, titles, issue_schedule)
 

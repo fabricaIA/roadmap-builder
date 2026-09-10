@@ -247,10 +247,13 @@ def build_roadmap(payload: RoadmapPayload, github_token: str = Header(...)):
                 issue_schedule,
             )
         except Exception as exc:
-            logger.exception("Falha ao criar/vincular o painel de projeto.")
+            logger.exception("Falha na etapa do painel de projeto.")
             return {
                 "status": "partial",
-                "message": "Milestones, labels e issues criados. O painel de projeto falhou.",
+                "message": (
+                    "Milestones, labels e issues foram criados. A etapa do painel "
+                    "de projeto (Projects V2) não foi concluída."
+                ),
                 "issues_created": titles,
                 "project_error": humanize_error(str(exc)),
             }
