@@ -1,12 +1,25 @@
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import "./App.css";
+
+// F4: base da API configurável por ambiente (Vite expõe só variáveis VITE_*).
+// Fallback para o dev local padrão.
+const API_BASE = (
+  import.meta.env.VITE_API_URL || "http://127.0.0.1:8000"
+).replace(/\/+$/, "");
 
 function App() {
   const [started, setStarted] = useState(false);
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [result, setResult] = useState(null);
   const [isTitleCustomized, setIsTitleCustomized] = useState(false);
+  // F2: preferência explícita do usuário para "criar painel", preservada
+  // quando o campo de Project existente é preenchido e depois limpo.
+  const [createProjectPref, setCreateProjectPref] = useState(true);
+  // F3: estado de carregamento/erro do template do backend.
+  const [templateLoading, setTemplateLoading] = useState(true);
+  const [templateError, setTemplateError] = useState("");
 
   const [formData, setFormData] = useState({
     githubToken: "",
@@ -22,85 +35,101 @@ function App() {
     issues: [],
   });
 
-  // Atualiza o projectTitle dinamicamente conforme owner e repo mudam, a menos que o usuário tenha customizado
-  useEffect(() => {
-    if (!isTitleCustomized) {
-      const owner = formData.owner.trim();
-      const repo = formData.repo.trim();
+  // Deriva o título do painel a partir de owner/repo (estado derivado, sem useEffect).
+  const deriveProjectTitle = (owner, repo) => {
+    const o = (owner || "").trim();
+    const r = (repo || "").trim();
+    if (o && r) return `${o}/${r} - Roadmap`;
+    if (o || r) return `${o || r} - Roadmap`;
+    return "Roadmap";
+  };
 
-      if (owner && repo) {
-        setFormData((prev) => ({
-          ...prev,
-          projectTitle: `${owner}/${repo} - Roadmap`,
-        }));
-      } else if (owner || repo) {
-        setFormData((prev) => ({
-          ...prev,
-          projectTitle: `${owner || repo} - Roadmap`,
-        }));
-      } else {
-        setFormData((prev) => ({
-          ...prev,
-          projectTitle: "Roadmap",
-        }));
+  // Busca o template único diretamente do backend.
+  // F3: exposto via useCallback para permitir "tentar novamente" e mostrar erro visível.
+  const loadTemplate = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/backlog-template`);
+      if (!response.ok) {
+        throw new Error(`Resposta ${response.status} do servidor`);
       }
+
+      const data = await response.json();
+      const durations = data.schedule?.milestone_durations || {};
+
+      const normalizedMilestones = (data.milestones || []).map((m) => ({
+        key: m.key,
+        title: m.title || "",
+        description: m.description || "",
+        value: durations[m.key]?.value ?? m.value ?? 1,
+        unit: durations[m.key]?.unit ?? m.unit ?? "months",
+      }));
+
+      const normalizedLabels = (data.labels || []).map((l) => ({
+        name: l.name,
+        color: l.color?.startsWith("#") ? l.color : `#${l.color || "0052CC"}`,
+        description: l.description || "",
+      }));
+
+      setTemplateError("");
+      setFormData((prev) => ({
+        ...prev,
+        projectStartDate:
+          data.schedule?.project_start_date || prev.projectStartDate,
+        milestones: normalizedMilestones,
+        labels: normalizedLabels,
+        issues: data.issues || [],
+      }));
+    } catch (error) {
+      console.error("Erro ao carregar backlog template:", error);
+      setTemplateError(
+        `Não foi possível carregar o modelo de backlog do servidor (${API_BASE}). ` +
+          "Verifique se o backend está no ar e tente novamente.",
+      );
+    } finally {
+      setTemplateLoading(false);
     }
-  }, [formData.owner, formData.repo, isTitleCustomized]);
-
-  // Busca o template único diretamente do backend ao montar o componente
-  useEffect(() => {
-    const loadTemplate = async () => {
-      try {
-        const response = await fetch(
-          "http://127.0.0.1:8000/api/backlog-template",
-        );
-        if (!response.ok)
-          throw new Error("Falha ao obter o template do backlog");
-
-        const data = await response.json();
-        const durations = data.schedule?.milestone_durations || {};
-
-        const normalizedMilestones = (data.milestones || []).map((m) => ({
-          key: m.key,
-          title: m.title || "",
-          description: m.description || "",
-          value: durations[m.key]?.value ?? m.value ?? 1,
-          unit: durations[m.key]?.unit ?? m.unit ?? "months",
-        }));
-
-        const normalizedLabels = (data.labels || []).map((l) => ({
-          name: l.name,
-          color: l.color?.startsWith("#") ? l.color : `#${l.color || "0052CC"}`,
-          description: l.description || "",
-        }));
-
-        setFormData((prev) => ({
-          ...prev,
-          projectStartDate:
-            data.schedule?.project_start_date || prev.projectStartDate,
-          milestones: normalizedMilestones,
-          labels: normalizedLabels,
-          issues: data.issues || [],
-        }));
-      } catch (error) {
-        console.error("Erro ao carregar backlog template:", error);
-      }
-    };
-
-    loadTemplate();
   }, []);
+
+  useEffect(() => {
+    // Busca única no mount. As chamadas de setState de loadTemplate ocorrem
+    // todas após `await` (assíncronas), então não há renders em cascata aqui;
+    // a regra não distingue esse caso.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadTemplate();
+  }, [loadTemplate]);
+
+  // F3: usado pelo botão "tentar novamente" (event handler — pode setar estado direto).
+  const retryLoadTemplate = () => {
+    setTemplateLoading(true);
+    setTemplateError("");
+    loadTemplate();
+  };
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
+    const newValue = type === "checkbox" ? checked : value;
 
-    if (name === "projectTitle") {
-      setIsTitleCustomized(true);
+    if (name === "createProject") {
+      setCreateProjectPref(checked);
     }
 
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? checked : value,
-    }));
+    // F9: título é estado derivado; só para de derivar enquanto houver texto manual.
+    let titleCustomized = isTitleCustomized;
+    if (name === "projectTitle") {
+      titleCustomized = value.trim() !== "";
+      setIsTitleCustomized(titleCustomized);
+    }
+
+    setFormData((prev) => {
+      const next = { ...prev, [name]: newValue };
+      if (
+        !titleCustomized &&
+        (name === "owner" || name === "repo" || name === "projectTitle")
+      ) {
+        next.projectTitle = deriveProjectTitle(next.owner, next.repo);
+      }
+      return next;
+    });
   };
 
   // --- Handlers de Milestones ---
@@ -230,6 +259,7 @@ function App() {
     e.preventDefault();
     setLoading(true);
     setMessage("");
+    setResult(null);
 
     const milestone_durations = {};
     formData.milestones.forEach((m) => {
@@ -281,7 +311,7 @@ function App() {
     };
 
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/build-roadmap", {
+      const response = await fetch(`${API_BASE}/api/build-roadmap`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -295,9 +325,20 @@ function App() {
         throw new Error(data.detail || "Erro ao processar roadmap");
       }
 
-      setMessage(
-        `Sucesso! Roadmap aplicado com ${formData.issues.length} issues.`,
-      );
+      // F1: o backend pode responder sucesso total ou parcial (ex.: issues
+      // criadas mas o Project falhou por falta de escopo no token).
+      setResult(data);
+      const issuesCount = (data.issues_created || []).length;
+      if (data.status === "partial") {
+        setMessage(
+          `Parcial: ${issuesCount} issue(s) criada(s), mas o painel de projeto não foi criado. ` +
+            (data.project_error || ""),
+        );
+      } else {
+        setMessage(
+          `Sucesso! Roadmap aplicado com ${issuesCount || formData.issues.length} issue(s).`,
+        );
+      }
     } catch (error) {
       setMessage(`Erro: ${error.message}`);
     } finally {
@@ -363,6 +404,28 @@ function App() {
           </div>
 
           <div className="form-content">
+            {/* F3: template não carregou — aviso visível + tentar novamente */}
+            {templateError && (
+              <div className="message error" style={{ marginBottom: "16px" }}>
+                {templateError}
+                <div style={{ marginTop: "8px" }}>
+                  <button
+                    type="button"
+                    onClick={retryLoadTemplate}
+                    className="btn-secondary"
+                    disabled={templateLoading}
+                  >
+                    {templateLoading ? "Carregando..." : "Tentar novamente"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {templateLoading && !templateError && (
+              <div className="message" style={{ marginBottom: "16px" }}>
+                Carregando modelo de backlog do servidor...
+              </div>
+            )}
+
             {/* PASSO 1 */}
             {step === 1 && (
               <div className="step-panel">
@@ -376,6 +439,19 @@ function App() {
                     onChange={handleInputChange}
                     placeholder="ghp_..."
                   />
+                  {/* F7: escopos necessários */}
+                  <small
+                    style={{
+                      color: "#666",
+                      fontSize: "0.8rem",
+                      marginTop: "4px",
+                      display: "block",
+                    }}
+                  >
+                    Escopos necessários no token: <code>repo</code> e, para
+                    criar ou vincular painéis (Projects V2),{" "}
+                    <code>project</code>.
+                  </small>
                 </div>
                 <div className="row">
                   <div className="form-group">
@@ -433,7 +509,9 @@ function App() {
                       setFormData((prev) => ({
                         ...prev,
                         projectNumber: val,
-                        createProject: val ? false : prev.createProject,
+                        // F2: ao preencher, desativa "criar painel"; ao limpar,
+                        // restaura a preferência explícita do usuário.
+                        createProject: val ? false : createProjectPref,
                       }));
                     }}
                     placeholder="Ex: 3 (deixe em branco para criar um novo projeto)"
@@ -963,6 +1041,25 @@ function App() {
               </div>
             )}
 
+            {/* F1: detalhamento do que foi efetivamente criado */}
+            {result && (
+              <div className="summary-box" style={{ marginTop: "12px" }}>
+                <p>
+                  <strong>Status:</strong>{" "}
+                  {result.status === "partial" ? "Parcial" : "Concluído"}
+                </p>
+                <p>
+                  <strong>Issues criadas:</strong>{" "}
+                  {(result.issues_created || []).length}
+                </p>
+                {result.project_error && (
+                  <p style={{ color: "#b00020" }}>
+                    <strong>Painel de projeto:</strong> {result.project_error}
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Ações */}
             <div
               className="form-actions"
@@ -993,13 +1090,29 @@ function App() {
                 </button>
               )}
               {step === 6 && (
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading}
-                  className="btn-success"
-                >
-                  {loading ? "Processando..." : "Finalizar e Enviar"}
-                </button>
+                <div style={{ textAlign: "right" }}>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={loading}
+                    className="btn-success"
+                  >
+                    {loading
+                      ? "Processando... (pode levar alguns minutos)"
+                      : "Finalizar e Enviar"}
+                  </button>
+                  {formData.apply && (
+                    <div
+                      style={{
+                        color: "#666",
+                        fontSize: "0.8rem",
+                        marginTop: "6px",
+                      }}
+                    >
+                      As issues são criadas uma a uma na API do GitHub; para
+                      backlogs grandes isso leva alguns minutos.
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
