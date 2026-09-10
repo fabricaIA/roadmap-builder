@@ -121,6 +121,12 @@ export default function Manual() {
           da org. Coordenador vê também o recorte por desenvolvedor.
         </li>
         <li>
+          <strong>Board</strong> — colunas com as issues que existem no GitHub
+          (a visão de gestão de um board), agrupáveis por fase, estado ou
+          responsável, com filtro por repositório/responsável. Cada card abre a
+          issue no GitHub.
+        </li>
+        <li>
           <strong>Devs</strong> (coordenador) — matriz de progresso por
           desenvolvedor e por fase.
         </li>

@@ -7,6 +7,7 @@ import Manual from "./pages/Manual";
 import Profile from "./pages/Profile";
 import ProjectDetail from "./pages/ProjectDetail";
 import ProjectWizard from "./pages/ProjectWizard";
+import Board from "./pages/dashboards/Board";
 import Devs from "./pages/dashboards/Devs";
 import MyIssues from "./pages/dashboards/MyIssues";
 import OrgIssues from "./pages/dashboards/OrgIssues";
@@ -69,6 +70,14 @@ function Header() {
             title="Todas as issues dos projetos da organização"
           >
             Issues da org
+          </Link>
+        )}
+        {current && (
+          <Link
+            to="/dashboards/board"
+            title="Board (colunas) das issues que existem no GitHub — visão de gestão consolidada"
+          >
+            Board
           </Link>
         )}
         {current && isCoordinator && (
@@ -163,6 +172,14 @@ export default function App() {
           element={
             <Protected>
               <OrgIssues />
+            </Protected>
+          }
+        />
+        <Route
+          path="/dashboards/board"
+          element={
+            <Protected>
+              <Board />
             </Protected>
           }
         />
