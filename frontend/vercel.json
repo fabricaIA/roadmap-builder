@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://roadmap-builder-f3nm.onrender.com/api/:path*"
+    }
+  ]
+}
