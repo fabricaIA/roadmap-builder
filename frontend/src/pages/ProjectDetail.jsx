@@ -110,6 +110,35 @@ export default function ProjectDetail() {
         ← Projetos
       </Link>
       <h1>{project.title || `${project.owner}/${project.repo}`}</h1>
+      <div className="version-actions">
+        <span className="phase-badge created">
+          Versão {project.current_version || 1}
+        </span>
+        <Link to={`/projects/${id}/edit`} className="btn-primary">
+          Editar projeto
+        </Link>
+        <Link to={`/projects/${id}/versions`} className="btn-secondary">
+          Histórico de versões
+        </Link>
+        {project.current_version > 1 ? (
+          <Link
+            to={`/projects/${id}/versions`}
+            state={{ restorePrevious: true }}
+            className="btn-secondary"
+          >
+            Voltar à versão anterior
+          </Link>
+        ) : (
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled
+            title="A primeira versão ainda não tem uma versão anterior"
+          >
+            Voltar à versão anterior
+          </button>
+        )}
+      </div>
       <p className="subtitle" style={{ color: "#666" }}>
         <a
           href={`https://github.com/${project.owner}/${project.repo}`}

@@ -35,7 +35,17 @@ export async function apiFetch(path, options = {}) {
 
   if (!res.ok) {
     const detail = data?.detail ?? data;
-    const message = typeof detail === "string" ? detail : `Erro ${res.status}`;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail
+              .map(
+                (item) =>
+                  `${(item.loc || []).filter((part) => part !== "body").join(" → ")}: ${item.msg}`,
+              )
+              .join("; ")
+          : `Erro ${res.status}`;
     throw new ApiError(message, res.status, detail);
   }
   return data;
