@@ -7,6 +7,7 @@ import Manual from "./pages/Manual";
 import Profile from "./pages/Profile";
 import ProjectDetail from "./pages/ProjectDetail";
 import ProjectWizard from "./pages/ProjectWizard";
+import ProjectVersions from "./pages/ProjectVersions";
 import Board from "./pages/dashboards/Board";
 import Devs from "./pages/dashboards/Devs";
 import MyIssues from "./pages/dashboards/MyIssues";
@@ -148,7 +149,23 @@ export default function App() {
           path="/projects/new"
           element={
             <Protected>
-              <ProjectWizard />
+              <ProjectWizard key="create" />
+            </Protected>
+          }
+        />
+        <Route
+          path="/projects/:id/edit"
+          element={
+            <Protected>
+              <ProjectWizard key="edit" mode="edit" />
+            </Protected>
+          }
+        />
+        <Route
+          path="/projects/:id/versions"
+          element={
+            <Protected>
+              <ProjectVersions />
             </Protected>
           }
         />

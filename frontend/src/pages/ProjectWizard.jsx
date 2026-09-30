@@ -1,10 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { apiFetch } from "../api/client";
 import { useAuth } from "../auth/useAuth";
+import {
+  editableSnapshot,
+  formToConfig,
+  moveItem,
+  templateToForm,
+} from "../projects/editor";
 import "../App.css";
 
-function ProjectWizard() {
+function ProjectWizard({ mode = "create" }) {
+  const { id } = useParams();
+  const editing = mode === "edit";
+  const saving = useRef(false);
+  const [baseVersion, setBaseVersion] = useState(null);
+  const [savedSignature, setSavedSignature] = useState("");
+  const [changeNote, setChangeNote] = useState("");
   const navigate = useNavigate();
   const { user } = useAuth();
 
@@ -33,6 +45,8 @@ function ProjectWizard() {
     projectTitle: "Roadmap",
     projectNumber: "",
     projectStartDate: new Date().toISOString().split("T")[0],
+    dateFieldStart: "Início previsto",
+    dateFieldEnd: "Fim previsto",
     milestones: [],
     labels: [],
     issues: [],
@@ -48,47 +62,49 @@ function ProjectWizard() {
 
   const loadTemplate = useCallback(async () => {
     try {
-      const data = await apiFetch("/api/backlog-template", {
-        allowUnauthorized: true,
-      });
-      const durations = data.schedule?.milestone_durations || {};
-
-      const normalizedMilestones = (data.milestones || []).map((m) => ({
-        key: m.key,
-        title: m.title || "",
-        description: m.description || "",
-        value: durations[m.key]?.value ?? m.value ?? 1,
-        unit: durations[m.key]?.unit ?? m.unit ?? "months",
-      }));
-
-      const normalizedLabels = (data.labels || []).map((l) => ({
-        name: l.name,
-        color: l.color?.startsWith("#") ? l.color : `#${l.color || "0052CC"}`,
-        description: l.description || "",
-      }));
-
-      setTemplateError("");
-      setSelectedPhases(normalizedMilestones.map((m) => m.key));
-      setTemplateLabelCount(normalizedLabels.length);
-      setActiveIssueTab(normalizedMilestones[0]?.key || "");
-      setFormData((prev) => ({
-        ...prev,
+      const version = editing
+        ? await apiFetch(`/api/projects/${id}/config`)
+        : null;
+      const data = version
+        ? version.snapshot.config
+        : await apiFetch("/api/backlog-template", { allowUnauthorized: true });
+      const fields = templateToForm(data);
+      const phases =
+        version?.snapshot.phase_keys ?? fields.milestones.map((m) => m.key);
+      const next = {
+        ...fields,
+        owner: version?.snapshot.owner || "",
+        repo: version?.snapshot.repo || "",
+        projectTitle: version?.snapshot.title || "Roadmap",
+        projectNumber: version?.snapshot.project_number ?? "",
         projectStartDate:
-          data.schedule?.project_start_date || prev.projectStartDate,
-        milestones: normalizedMilestones,
-        labels: normalizedLabels,
-        issues: data.issues || [],
-      }));
+          fields.projectStartDate ||
+          (editing ? "" : new Date().toISOString().split("T")[0]),
+        apply: !editing,
+        createProject: !editing,
+      };
+      setTemplateError("");
+      setSelectedPhases(phases);
+      setTemplateLabelCount(fields.labels.length);
+      setActiveIssueTab(fields.milestones[0]?.key || "");
+      setFormData(next);
+      if (version) {
+        setBaseVersion(version.version);
+        setSavedSignature(JSON.stringify(editableSnapshot(next, phases)));
+        setIsTitleCustomized(true);
+      }
     } catch (error) {
       console.error("Erro ao carregar backlog template:", error);
       setTemplateError(
-        "Não foi possível carregar o modelo de backlog do servidor. " +
+        (editing
+          ? "Não foi possível carregar a configuração do projeto. "
+          : "Não foi possível carregar o modelo de backlog do servidor. ") +
           "Verifique se o backend está no ar e tente novamente.",
       );
     } finally {
       setTemplateLoading(false);
     }
-  }, []);
+  }, [editing, id]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -99,6 +115,31 @@ function ProjectWizard() {
     setTemplateLoading(true);
     setTemplateError("");
     loadTemplate();
+  };
+
+  const dirty =
+    editing &&
+    savedSignature !== "" &&
+    JSON.stringify(editableSnapshot(formData, selectedPhases)) !==
+      savedSignature;
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const leaveEditor = () => {
+    if (
+      !dirty ||
+      window.confirm("Descartar as alterações que ainda não foram salvas?")
+    ) {
+      navigate(editing ? `/projects/${id}` : "/");
+    }
   };
 
   const togglePhase = (key) => {
@@ -112,10 +153,10 @@ function ProjectWizard() {
   const phaseSet = new Set(selectedPhases);
   const visibleMilestones = formData.milestones
     .map((m, i) => ({ m, i }))
-    .filter(({ m }) => phaseSet.has(m.key));
+    .filter(({ m }) => editing || phaseSet.has(m.key));
   const visibleIssues = formData.issues
     .map((iss, i) => ({ iss, i }))
-    .filter(({ iss }) => phaseSet.has(iss.milestone));
+    .filter(({ iss }) => editing || phaseSet.has(iss.milestone));
   const usedLabelNames = new Set(
     visibleIssues.flatMap(({ iss }) => iss.labels || []),
   );
@@ -123,7 +164,8 @@ function ProjectWizard() {
     .map((l, i) => ({ l, i }))
     // labels usadas pelas fases selecionadas + as adicionadas manualmente
     .filter(
-      ({ l, i }) => usedLabelNames.has(l.name) || i >= templateLabelCount,
+      ({ l, i }) =>
+        editing || usedLabelNames.has(l.name) || i >= templateLabelCount,
     );
   const labelPhases = (name) =>
     formData.milestones
@@ -137,7 +179,7 @@ function ProjectWizard() {
   // Abas da etapa de issues: fases selecionadas, na ordem dos marcos.
   const tabPhases = formData.milestones
     .map((m) => m.key)
-    .filter((k) => phaseSet.has(k));
+    .filter((k) => editing || phaseSet.has(k));
   const effectiveTab = tabPhases.includes(activeIssueTab)
     ? activeIssueTab
     : tabPhases[0] || "";
@@ -162,6 +204,13 @@ function ProjectWizard() {
 
     setFormData((prev) => {
       const next = { ...prev, [name]: newValue };
+      if (
+        editing &&
+        (name === "owner" || name === "repo") &&
+        newValue !== prev[name]
+      ) {
+        next.projectNumber = "";
+      }
       if (
         !titleCustomized &&
         (name === "owner" || name === "repo" || name === "projectTitle")
@@ -213,17 +262,41 @@ function ProjectWizard() {
   };
 
   const removeMilestone = (index) => {
+    const key = formData.milestones[index].key;
+    const count = formData.issues.filter(
+      (issue) => issue.milestone === key,
+    ).length;
+    if (
+      count &&
+      !window.confirm(
+        `Remover o marco ${key} e suas ${count} issue(s) desta edição? As versões anteriores serão preservadas.`,
+      )
+    )
+      return;
+    setSelectedPhases((phases) => phases.filter((phase) => phase !== key));
     setFormData({
       ...formData,
       milestones: formData.milestones.filter((_, i) => i !== index),
+      issues: formData.issues.filter((issue) => issue.milestone !== key),
     });
   };
 
-  // --- Handlers de Labels ---
+  // Alterações de nomes propagam as referências dentro do template inteiro.
   const handleLabelChange = (index, field, value) => {
-    const list = [...formData.labels];
-    list[index][field] = value;
-    setFormData({ ...formData, labels: list });
+    const oldName = formData.labels[index].name;
+    const labels = formData.labels.map((label, i) =>
+      i === index ? { ...label, [field]: value } : label,
+    );
+    const issues =
+      field === "name"
+        ? formData.issues.map((issue) => ({
+            ...issue,
+            labels: issue.labels.map((name) =>
+              name === oldName ? value : name,
+            ),
+          }))
+        : formData.issues;
+    setFormData({ ...formData, labels, issues });
   };
 
   const addLabel = () => {
@@ -240,30 +313,36 @@ function ProjectWizard() {
     setFormData({
       ...formData,
       labels: formData.labels.filter((_, i) => i !== index),
+      issues: formData.issues.map((issue) => ({
+        ...issue,
+        labels: issue.labels.filter(
+          (name) => name !== formData.labels[index].name,
+        ),
+      })),
     });
   };
 
   // --- Handlers de Issues ---
   const handleIssueChange = (index, field, value) => {
-    const list = [...formData.issues];
+    const list = structuredClone(formData.issues);
     list[index][field] = value;
     setFormData({ ...formData, issues: list });
   };
 
   const handleIssueArrayChange = (issueIndex, arrayField, itemIndex, value) => {
-    const list = [...formData.issues];
+    const list = structuredClone(formData.issues);
     list[issueIndex][arrayField][itemIndex] = value;
     setFormData({ ...formData, issues: list });
   };
 
   const addIssueItem = (issueIndex, arrayField) => {
-    const list = [...formData.issues];
+    const list = structuredClone(formData.issues);
     list[issueIndex][arrayField].push("");
     setFormData({ ...formData, issues: list });
   };
 
   const removeIssueItem = (issueIndex, arrayField, itemIndex) => {
-    const list = [...formData.issues];
+    const list = structuredClone(formData.issues);
     list[issueIndex][arrayField] = list[issueIndex][arrayField].filter(
       (_, i) => i !== itemIndex,
     );
@@ -271,7 +350,7 @@ function ProjectWizard() {
   };
 
   const handleToggleIssueLabel = (issueIndex, labelName) => {
-    const list = [...formData.issues];
+    const list = structuredClone(formData.issues);
     const currentLabels = list[issueIndex].labels || [];
     if (currentLabels.includes(labelName)) {
       list[issueIndex].labels = currentLabels.filter((l) => l !== labelName);
@@ -310,34 +389,30 @@ function ProjectWizard() {
     });
   };
 
+  const move = (field, index, direction) =>
+    setFormData((prev) => ({
+      ...prev,
+      [field]: moveItem(prev[field], index, direction),
+    }));
+
   const nextStep = () => setStep((prev) => prev + 1);
   const prevStep = () => setStep((prev) => prev - 1);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (saving.current || (editing && !dirty)) return;
+    if (
+      !formData.owner.trim() ||
+      !formData.repo.trim() ||
+      !formData.projectTitle.trim()
+    ) {
+      setMessage("Erro: preencha owner, repositório e título.");
+      return;
+    }
+    saving.current = true;
     setLoading(true);
     setMessage("");
     setResult(null);
-
-    const milestone_durations = {};
-    formData.milestones.forEach((m) => {
-      milestone_durations[m.key] = {
-        value: parseInt(m.value, 10) || 1,
-        unit: m.unit,
-      };
-    });
-
-    const formattedLabels = formData.labels.map((l) => ({
-      name: l.name,
-      color: l.color.replace("#", ""),
-      description: l.description,
-    }));
-
-    const formattedMilestones = formData.milestones.map((m) => ({
-      key: m.key,
-      title: m.title,
-      description: m.description,
-    }));
 
     const hasProjectNumber = Boolean(
       formData.projectNumber && parseInt(formData.projectNumber, 10) > 0,
@@ -360,22 +435,26 @@ function ProjectWizard() {
         selectedPhases.length < formData.milestones.length
           ? selectedPhases
           : null,
-      config: {
-        schedule: {
-          project_start_date: formData.projectStartDate,
-          project_date_fields: {
-            start: "Início previsto",
-            end: "Fim previsto",
-          },
-          milestone_durations: milestone_durations,
-        },
-        labels: formattedLabels,
-        milestones: formattedMilestones,
-        issues: formData.issues,
-      },
+      config: formToConfig(formData),
     };
 
     try {
+      if (editing) {
+        const state = editableSnapshot(formData, selectedPhases);
+        const version = await apiFetch(`/api/projects/${id}/config`, {
+          method: "PUT",
+          body: {
+            ...state,
+            base_version: baseVersion,
+            change_note: changeNote.trim() || "Projeto editado pelo formulário",
+          },
+        });
+        setBaseVersion(version.version);
+        setSavedSignature(JSON.stringify(state));
+        setChangeNote("");
+        setMessage(`Versão ${version.version} salva com sucesso.`);
+        return;
+      }
       // PR2: cria/registra o projeto (o backend também insere a linha Project).
       const data = await apiFetch("/api/projects", {
         method: "POST",
@@ -402,6 +481,7 @@ function ProjectWizard() {
     } catch (error) {
       setMessage(`Erro: ${error.message}`);
     } finally {
+      saving.current = false;
       setLoading(false);
     }
   };
@@ -409,393 +489,340 @@ function ProjectWizard() {
   return (
     <div className="app-wrapper">
       <div className="form-container-wrapper">
-        <button onClick={() => navigate("/")} className="btn-top-welcome">
+        <button onClick={leaveEditor} className="btn-top-welcome">
           ← Voltar
         </button>
 
         <div className="container">
-          <div className="stepper">
-            {[
-              "Início",
-              "Durações",
-              "Labels",
-              "Marcos",
-              "Issues",
-              "Revisão",
-            ].map((labelName, i) => {
-              const num = i + 1;
-              return (
-                <div
-                  key={num}
-                  className={`step ${step >= num ? "active" : ""}`}
-                >
-                  <div className="step-circle">{num}</div>
-                  <div className="step-label">{labelName}</div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="form-content">
-            {!user?.has_pat && (
-              <div className="message error" style={{ marginBottom: "16px" }}>
-                Você ainda não configurou um PAT do GitHub.{" "}
-                <Link to="/profile">Configurar no perfil</Link> antes de
-                aplicar.
-              </div>
-            )}
-
-            {/* F3: template não carregou */}
-            {templateError && (
-              <div className="message error" style={{ marginBottom: "16px" }}>
-                {templateError}
-                <div style={{ marginTop: "8px" }}>
-                  <button
-                    type="button"
-                    onClick={retryLoadTemplate}
-                    className="btn-secondary"
-                    disabled={templateLoading}
-                  >
-                    {templateLoading ? "Carregando..." : "Tentar novamente"}
-                  </button>
-                </div>
-              </div>
-            )}
-            {templateLoading && !templateError && (
-              <div className="message" style={{ marginBottom: "16px" }}>
-                Carregando modelo de backlog do servidor...
-              </div>
-            )}
-
-            {/* PASSO 1 */}
-            {step === 1 && (
-              <div className="step-panel">
-                <h2>Configurações Iniciais</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: 16,
-                  }}
-                >
-                  O acesso ao GitHub usa o PAT configurado no seu{" "}
-                  <Link to="/profile">perfil</Link>.
+          {editing && (
+            <div className="version-editor-head">
+              <div>
+                <h1>Editar projeto</h1>
+                <p>
+                  Versão {baseVersion ?? "…"} ·{" "}
+                  {dirty
+                    ? "Alterações não salvas"
+                    : "Nenhuma alteração pendente"}
                 </p>
-                <div className="row">
-                  <div className="form-group">
-                    <label>Owner *</label>
-                    <input
-                      type="text"
-                      name="owner"
-                      value={formData.owner}
-                      onChange={handleInputChange}
-                      placeholder="Ex: JuanPabloFAC"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Repositório *</label>
-                    <input
-                      type="text"
-                      name="repo"
-                      value={formData.repo}
-                      onChange={handleInputChange}
-                      placeholder="Ex: roadmap3"
-                    />
-                  </div>
-                </div>
-                <div className="row">
-                  <div className="form-group">
-                    <label>Título do Projeto</label>
-                    <input
-                      type="text"
-                      name="projectTitle"
-                      value={formData.projectTitle}
-                      onChange={handleInputChange}
-                      placeholder="Ex: owner/repo - Roadmap"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Data de Início</label>
-                    <input
-                      type="date"
-                      name="projectStartDate"
-                      value={formData.projectStartDate}
-                      onChange={handleInputChange}
-                    />
-                  </div>
-                </div>
-
-                <div className="form-group" style={{ marginTop: "10px" }}>
-                  <label>Número de um Project existente (Opcional)</label>
-                  <input
-                    type="number"
-                    min="1"
-                    name="projectNumber"
-                    value={formData.projectNumber}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setFormData((prev) => ({
-                        ...prev,
-                        projectNumber: val,
-                        // F2
-                        createProject: val ? false : createProjectPref,
-                      }));
-                    }}
-                    placeholder="Ex: 3 (deixe em branco para criar um novo projeto)"
-                  />
-                  <small
-                    style={{
-                      color: "#666",
-                      fontSize: "0.8rem",
-                      marginTop: "4px",
-                    }}
+              </div>
+              <Link
+                to={`/projects/${id}/versions`}
+                onClick={(event) => {
+                  if (
+                    dirty &&
+                    !window.confirm(
+                      "Sair da edição e descartar alterações não salvas?",
+                    )
+                  )
+                    event.preventDefault();
+                }}
+                className="btn-secondary"
+              >
+                Histórico de versões
+              </Link>
+              <button
+                type="button"
+                className="btn-success"
+                onClick={handleSubmit}
+                disabled={
+                  loading || templateLoading || !!templateError || !dirty
+                }
+              >
+                {loading ? "Salvando…" : "Salvar nova versão"}
+              </button>
+            </div>
+          )}
+          {editing && message && (
+            <div
+              className={`message ${message.startsWith("Erro") ? "error" : "success"}`}
+              role={message.startsWith("Erro") ? "alert" : "status"}
+            >
+              {message}
+            </div>
+          )}
+          {templateError && (
+            <div className="message error" role="alert">
+              {templateError}{" "}
+              <button type="button" onClick={retryLoadTemplate}>
+                Tentar novamente
+              </button>
+            </div>
+          )}
+          <fieldset
+            className="wizard-fields"
+            disabled={loading || templateLoading || !!templateError}
+          >
+            <div className="stepper">
+              {[
+                "Início",
+                "Durações",
+                "Labels",
+                "Marcos",
+                "Issues",
+                "Revisão",
+              ].map((labelName, i) => {
+                const num = i + 1;
+                return (
+                  <div
+                    key={num}
+                    className={`step ${step >= num ? "active" : ""}`}
                   >
-                    Se informado, as issues serão vinculadas a este projeto
-                    existente em vez de criar um novo.
-                  </small>
-                </div>
+                    <div className="step-circle">{num}</div>
+                    <div className="step-label">{labelName}</div>
+                  </div>
+                );
+              })}
+            </div>
 
-                <fieldset
-                  className="phase-picker"
-                  title="Escolha quais fases provisionar agora. As demais ficam guardadas no projeto e podem ser aplicadas depois."
-                >
-                  <legend>Fases a criar agora</legend>
-                  <p
-                    style={{
-                      color: "#666",
-                      fontSize: "0.8rem",
-                      margin: "0 0 8px",
-                    }}
-                  >
-                    Marque só as fases que quer provisionar neste momento. As
-                    demais ficam guardadas e podem ser aplicadas depois na tela
-                    do projeto. Os passos seguintes mostram apenas os marcos,
-                    labels e issues das fases marcadas.
-                  </p>
-                  {formData.milestones.map((m) => (
-                    <label key={m.key} className="phase-check">
-                      <input
-                        type="checkbox"
-                        checked={selectedPhases.includes(m.key)}
-                        onChange={() => togglePhase(m.key)}
-                      />{" "}
-                      {m.title || m.key}
-                    </label>
-                  ))}
-                  {selectedPhases.length === 0 && (
-                    <div
-                      className="message error"
-                      style={{ marginTop: 8, fontSize: "0.85rem" }}
+            <div className="form-content">
+              {!editing && !user?.has_pat && (
+                <div className="message error" style={{ marginBottom: "16px" }}>
+                  Você ainda não configurou um PAT do GitHub.{" "}
+                  <Link to="/profile">Configurar no perfil</Link> antes de
+                  aplicar.
+                </div>
+              )}
+
+              {/* F3: template não carregou */}
+              {templateError && (
+                <div className="message error" style={{ marginBottom: "16px" }}>
+                  {templateError}
+                  <div style={{ marginTop: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={retryLoadTemplate}
+                      className="btn-secondary"
+                      disabled={templateLoading}
                     >
-                      Selecione ao menos uma fase.
+                      {templateLoading ? "Carregando..." : "Tentar novamente"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {templateLoading && !templateError && (
+                <div className="message" style={{ marginBottom: "16px" }}>
+                  Carregando modelo de backlog do servidor...
+                </div>
+              )}
+
+              {/* PASSO 1 */}
+              {step === 1 && (
+                <div className="step-panel">
+                  <h2>Configurações Iniciais</h2>
+                  <p
+                    className="subtitle"
+                    style={{
+                      color: "#666",
+                      fontSize: "0.9rem",
+                      marginBottom: 16,
+                    }}
+                  >
+                    {editing ? (
+                      "Salve as alterações do projeto como uma nova versão. A edição fica guardada no aplicativo."
+                    ) : (
+                      <>
+                        O acesso ao GitHub usa o PAT configurado no seu{" "}
+                        <Link to="/profile">perfil</Link>.
+                      </>
+                    )}
+                  </p>
+                  <div className="row">
+                    <div className="form-group">
+                      <label htmlFor="project-owner">Owner *</label>
+                      <input
+                        type="text"
+                        id="project-owner"
+                        name="owner"
+                        value={formData.owner}
+                        onChange={handleInputChange}
+                        placeholder="Ex: JuanPabloFAC"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="project-repo">Repositório *</label>
+                      <input
+                        type="text"
+                        id="project-repo"
+                        name="repo"
+                        value={formData.repo}
+                        onChange={handleInputChange}
+                        placeholder="Ex: roadmap3"
+                      />
+                    </div>
+                  </div>
+                  <div className="row">
+                    <div className="form-group">
+                      <label htmlFor="project-title">Título do Projeto</label>
+                      <input
+                        type="text"
+                        id="project-title"
+                        name="projectTitle"
+                        value={formData.projectTitle}
+                        onChange={handleInputChange}
+                        placeholder="Ex: owner/repo - Roadmap"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Data de Início</label>
+                      <input
+                        type="date"
+                        name="projectStartDate"
+                        value={formData.projectStartDate}
+                        onChange={handleInputChange}
+                      />
+                    </div>
+                  </div>
+
+                  {editing && (
+                    <div className="row">
+                      <div className="form-group">
+                        <label htmlFor="date-field-start">
+                          Campo de data de início
+                        </label>
+                        <input
+                          id="date-field-start"
+                          name="dateFieldStart"
+                          value={formData.dateFieldStart}
+                          onChange={handleInputChange}
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="date-field-end">
+                          Campo de data de fim
+                        </label>
+                        <input
+                          id="date-field-end"
+                          name="dateFieldEnd"
+                          value={formData.dateFieldEnd}
+                          onChange={handleInputChange}
+                        />
+                      </div>
                     </div>
                   )}
-                </fieldset>
-              </div>
-            )}
-
-            {/* PASSO 2 */}
-            {step === 2 && (
-              <div className="step-panel">
-                <h2>Durações dos Marcos (Milestones Durations)</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Defina o identificador e o tempo de duração de cada marco para
-                  o cálculo automático do cronograma.
-                </p>
-                {visibleMilestones.map(({ m, i: index }) => (
-                  <div key={index} className="dynamic-row">
-                    <input
-                      type="text"
-                      value={m.key}
-                      onChange={(e) =>
-                        handleMilestoneChange(index, "key", e.target.value)
-                      }
-                      placeholder="Ex: M1"
-                      className="short-input"
-                    />
+                  <div className="form-group" style={{ marginTop: "10px" }}>
+                    <label>Número de um Project existente (Opcional)</label>
                     <input
                       type="number"
                       min="1"
-                      value={m.value}
-                      onChange={(e) =>
-                        handleMilestoneChange(index, "value", e.target.value)
-                      }
-                      className="short-input"
+                      name="projectNumber"
+                      value={formData.projectNumber}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setFormData((prev) => ({
+                          ...prev,
+                          projectNumber: val,
+                          // F2
+                          createProject: val ? false : createProjectPref,
+                        }));
+                      }}
+                      placeholder="Ex: 3 (deixe em branco para criar um novo projeto)"
                     />
-                    <select
-                      value={m.unit}
-                      onChange={(e) =>
-                        handleMilestoneChange(index, "unit", e.target.value)
-                      }
-                    >
-                      <option value="days">Dias</option>
-                      <option value="months">Meses</option>
-                    </select>
-                    <button
-                      type="button"
-                      onClick={() => removeMilestone(index)}
-                      className="btn-remove"
+                    <small
                       style={{
-                        visibility:
-                          formData.milestones.length === 1
-                            ? "hidden"
-                            : "visible",
+                        color: "#666",
+                        fontSize: "0.8rem",
+                        marginTop: "4px",
                       }}
                     >
-                      X
-                    </button>
+                      {editing
+                        ? "Ao trocar owner ou repositório, informe novamente o número do painel, se houver."
+                        : "Se informado, as issues serão vinculadas a este projeto existente em vez de criar um novo."}
+                    </small>
                   </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addMilestone}
-                  className="btn-secondary"
-                  style={{ marginTop: "10px" }}
-                  title="Cria um novo marco (milestone). Ele já entra selecionado nas fases a criar."
-                >
-                  + Adicionar Duração
-                </button>
-              </div>
-            )}
 
-            {/* PASSO 3 */}
-            {step === 3 && (
-              <div className="step-panel">
-                <h2>Etiquetas (Labels)</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Configure o nome, a cor de identificação e a descrição de cada
-                  label. Mostrando apenas as labels usadas pelas fases
-                  selecionadas.
-                </p>
-                {visibleLabels.map(({ l, i: index }) => (
-                  <div key={index} className="label-row">
-                    <input
-                      type="text"
-                      value={l.name}
-                      onChange={(e) =>
-                        handleLabelChange(index, "name", e.target.value)
-                      }
-                      placeholder="Ex: fase:i"
-                      className="label-name-input"
-                    />
-                    <span
-                      className="phase-badge partial"
-                      title="Fases que usam"
-                    >
-                      {labelPhases(l.name).join(", ") || "—"}
-                    </span>
-                    <div className="color-picker-wrapper">
-                      <input
-                        type="color"
-                        value={
-                          l.color.startsWith("#") ? l.color : `#${l.color}`
-                        }
-                        onChange={(e) =>
-                          handleLabelChange(index, "color", e.target.value)
-                        }
-                      />
-                      <input
-                        type="text"
-                        value={l.color}
-                        onChange={(e) =>
-                          handleLabelChange(index, "color", e.target.value)
-                        }
-                        placeholder="#1D76DB"
-                        className="color-text-input"
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={l.description}
-                      onChange={(e) =>
-                        handleLabelChange(index, "description", e.target.value)
-                      }
-                      placeholder="Descrição da label"
-                      className="label-desc-input"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeLabel(index)}
-                      className="btn-remove"
+                  <fieldset
+                    className="phase-picker"
+                    title="Escolha quais fases provisionar agora. As demais ficam guardadas no projeto e podem ser aplicadas depois."
+                  >
+                    <legend>
+                      {editing ? "Seleção de fases" : "Fases a criar agora"}
+                    </legend>
+                    <p
                       style={{
-                        visibility:
-                          formData.labels.length === 1 ? "hidden" : "visible",
+                        color: "#666",
+                        fontSize: "0.8rem",
+                        margin: "0 0 8px",
                       }}
                     >
-                      X
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addLabel}
-                  className="btn-secondary"
-                  style={{ marginTop: "10px" }}
-                  title="Cria uma etiqueta nova. Ela fica sempre visível aqui; use os chips na etapa de Issues para aplicá-la."
-                >
-                  + Adicionar Label
-                </button>
-              </div>
-            )}
+                      Marque só as fases que quer provisionar neste momento. As
+                      demais ficam guardadas e podem ser aplicadas depois na
+                      tela do projeto. Os passos seguintes mostram apenas os
+                      marcos, labels e issues das fases marcadas.
+                    </p>
+                    {formData.milestones.map((m) => (
+                      <label key={m.key} className="phase-check">
+                        <input
+                          type="checkbox"
+                          checked={selectedPhases.includes(m.key)}
+                          onChange={() => togglePhase(m.key)}
+                        />{" "}
+                        {m.title || m.key}
+                      </label>
+                    ))}
+                    {selectedPhases.length === 0 &&
+                      formData.milestones.length > 0 && (
+                        <div
+                          className="message error"
+                          style={{ marginTop: 8, fontSize: "0.85rem" }}
+                        >
+                          Selecione ao menos uma fase.
+                        </div>
+                      )}
+                  </fieldset>
+                </div>
+              )}
 
-            {/* PASSO 4 */}
-            {step === 4 && (
-              <div className="step-panel">
-                <h2>Marcos do Projeto (Milestones)</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "20px",
-                  }}
-                >
-                  Defina os detalhes de título e descrição de cada marco do
-                  roadmap.
-                </p>
-                {visibleMilestones.map(({ m, i: index }) => (
-                  <div key={index} className="milestone-card">
-                    <div className="milestone-top-row">
+              {/* PASSO 2 */}
+              {step === 2 && (
+                <div className="step-panel">
+                  <h2>Durações dos Marcos (Milestones Durations)</h2>
+                  <p
+                    className="subtitle"
+                    style={{
+                      color: "#666",
+                      fontSize: "0.9rem",
+                      marginBottom: "20px",
+                    }}
+                  >
+                    Defina o identificador e o tempo de duração de cada marco
+                    para o cálculo automático do cronograma.
+                  </p>
+                  {visibleMilestones.map(({ m, i: index }) => (
+                    <div key={index} className="dynamic-row">
                       <input
                         type="text"
                         value={m.key}
                         onChange={(e) =>
                           handleMilestoneChange(index, "key", e.target.value)
                         }
-                        placeholder="Chave"
-                        className="milestone-key-input"
+                        placeholder="Ex: M1"
+                        className="short-input"
                       />
                       <input
-                        type="text"
-                        value={m.title}
+                        type="number"
+                        min="1"
+                        value={m.value}
                         onChange={(e) =>
-                          handleMilestoneChange(index, "title", e.target.value)
+                          handleMilestoneChange(index, "value", e.target.value)
                         }
-                        placeholder="Título do Marco (ex: M1 - Exploração)"
-                        className="milestone-title-input"
+                        className="short-input"
                       />
+                      <select
+                        value={m.unit}
+                        onChange={(e) =>
+                          handleMilestoneChange(index, "unit", e.target.value)
+                        }
+                      >
+                        <option value="days">Dias</option>
+                        <option value="months">Meses</option>
+                      </select>
                       <button
                         type="button"
                         onClick={() => removeMilestone(index)}
                         className="btn-remove"
                         style={{
                           visibility:
-                            formData.milestones.length === 1
+                            !editing && formData.milestones.length === 1
                               ? "hidden"
                               : "visible",
                         }}
@@ -803,444 +830,684 @@ function ProjectWizard() {
                         X
                       </button>
                     </div>
-                    <div className="milestone-desc-row">
-                      <textarea
-                        rows="2"
-                        value={m.description}
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addMilestone}
+                    className="btn-secondary"
+                    style={{ marginTop: "10px" }}
+                    title="Cria um novo marco (milestone). Ele já entra selecionado nas fases a criar."
+                  >
+                    + Adicionar Duração
+                  </button>
+                </div>
+              )}
+
+              {/* PASSO 3 */}
+              {step === 3 && (
+                <div className="step-panel">
+                  <h2>Etiquetas (Labels)</h2>
+                  <p
+                    className="subtitle"
+                    style={{
+                      color: "#666",
+                      fontSize: "0.9rem",
+                      marginBottom: "20px",
+                    }}
+                  >
+                    Configure o nome, a cor de identificação e a descrição de
+                    cada label. Mostrando apenas as labels usadas pelas fases
+                    selecionadas.
+                  </p>
+                  {visibleLabels.map(({ l, i: index }) => (
+                    <div key={index} className="label-row">
+                      <input
+                        type="text"
+                        value={l.name}
                         onChange={(e) =>
-                          handleMilestoneChange(
+                          handleLabelChange(index, "name", e.target.value)
+                        }
+                        placeholder="Ex: fase:i"
+                        className="label-name-input"
+                      />
+                      <span
+                        className="phase-badge partial"
+                        title="Fases que usam"
+                      >
+                        {labelPhases(l.name).join(", ") || "—"}
+                      </span>
+                      <div className="color-picker-wrapper">
+                        <input
+                          type="color"
+                          value={
+                            l.color.startsWith("#") ? l.color : `#${l.color}`
+                          }
+                          onChange={(e) =>
+                            handleLabelChange(index, "color", e.target.value)
+                          }
+                        />
+                        <input
+                          type="text"
+                          value={l.color}
+                          onChange={(e) =>
+                            handleLabelChange(index, "color", e.target.value)
+                          }
+                          placeholder="#1D76DB"
+                          className="color-text-input"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        value={l.description}
+                        onChange={(e) =>
+                          handleLabelChange(
                             index,
                             "description",
                             e.target.value,
                           )
                         }
-                        placeholder="Descrição detalhada do marco..."
-                        className="milestone-textarea"
+                        placeholder="Descrição da label"
+                        className="label-desc-input"
                       />
-                    </div>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addMilestone}
-                  className="btn-secondary"
-                  style={{ marginTop: "10px" }}
-                  title="Cria um novo marco (milestone) e o adiciona às fases a criar."
-                >
-                  + Adicionar Milestone
-                </button>
-              </div>
-            )}
-
-            {/* PASSO 5 */}
-            {step === 5 && (
-              <div className="step-panel">
-                <h2>Issues e Entregáveis</h2>
-                <p
-                  className="subtitle"
-                  style={{
-                    color: "#666",
-                    fontSize: "0.9rem",
-                    marginBottom: "12px",
-                  }}
-                >
-                  Cadastre as atividades, entregáveis e critérios de aceite
-                  vinculados aos marcos. Uma aba por fase.
-                </p>
-
-                <div
-                  className="issue-tabs"
-                  role="tablist"
-                  title="Cada aba mostra as issues de uma fase (milestone)"
-                >
-                  {tabPhases.map((k) => {
-                    const count = formData.issues.filter(
-                      (i) => i.milestone === k,
-                    ).length;
-                    return (
                       <button
-                        key={k}
                         type="button"
-                        className={`issue-tab ${k === effectiveTab ? "active" : ""}`}
-                        onClick={() => setActiveIssueTab(k)}
-                        title={`Ver e editar as issues da fase ${k}`}
+                        onClick={() => removeLabel(index)}
+                        className="btn-remove"
+                        style={{
+                          visibility:
+                            !editing && formData.labels.length === 1
+                              ? "hidden"
+                              : "visible",
+                        }}
                       >
-                        {k} <span className="issue-tab-count">{count}</span>
+                        X
                       </button>
-                    );
-                  })}
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={addLabel}
+                    className="btn-secondary"
+                    style={{ marginTop: "10px" }}
+                    title="Cria uma etiqueta nova. Ela fica sempre visível aqui; use os chips na etapa de Issues para aplicá-la."
+                  >
+                    + Adicionar Label
+                  </button>
                 </div>
+              )}
 
-                <div className="issues-scroll-container">
-                  {tabIssues.length === 0 && (
-                    <p style={{ color: "#666" }}>
-                      Nenhuma issue nesta fase. Use “+ Adicionar Nova Issue”.
-                    </p>
-                  )}
-                  {tabIssues.map(({ iss, i: issIndex }) => (
-                    <div key={issIndex} className="issue-card-box">
-                      <div className="issue-top-row">
-                        <span
-                          className="phase-badge created"
-                          title="Fase (milestone) desta issue"
-                        >
-                          {iss.milestone}
-                        </span>
+              {/* PASSO 4 */}
+              {step === 4 && (
+                <div className="step-panel">
+                  <h2>Marcos do Projeto (Milestones)</h2>
+                  <p
+                    className="subtitle"
+                    style={{
+                      color: "#666",
+                      fontSize: "0.9rem",
+                      marginBottom: "20px",
+                    }}
+                  >
+                    Defina os detalhes de título e descrição de cada marco do
+                    roadmap.
+                  </p>
+                  {visibleMilestones.map(({ m, i: index }) => (
+                    <div key={index} className="milestone-card">
+                      <div className="milestone-top-row">
+                        <div className="order-buttons">
+                          <button
+                            type="button"
+                            aria-label={`Mover marco ${m.key} para cima`}
+                            disabled={index === 0}
+                            onClick={() => move("milestones", index, -1)}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Mover marco ${m.key} para baixo`}
+                            disabled={index === formData.milestones.length - 1}
+                            onClick={() => move("milestones", index, 1)}
+                          >
+                            ↓
+                          </button>
+                        </div>
                         <input
                           type="text"
-                          value={iss.title}
+                          value={m.key}
                           onChange={(e) =>
-                            handleIssueChange(issIndex, "title", e.target.value)
+                            handleMilestoneChange(index, "key", e.target.value)
                           }
-                          placeholder="Título da Issue (ex: [Atividade] ...)"
-                          className="issue-title-input"
+                          placeholder="Chave"
+                          className="milestone-key-input"
                         />
-                        <select
-                          value={iss.milestone}
+                        <input
+                          type="text"
+                          value={m.title}
                           onChange={(e) =>
-                            handleIssueChange(
-                              issIndex,
-                              "milestone",
+                            handleMilestoneChange(
+                              index,
+                              "title",
                               e.target.value,
                             )
                           }
-                          className="issue-milestone-select"
-                        >
-                          {formData.milestones.map((m) => (
-                            <option key={m.key} value={m.key}>
-                              {m.key}
-                            </option>
-                          ))}
-                        </select>
+                          placeholder="Título do Marco (ex: M1 - Exploração)"
+                          className="milestone-title-input"
+                        />
                         <button
                           type="button"
-                          onClick={() => removeIssue(issIndex)}
+                          onClick={() => removeMilestone(index)}
                           className="btn-remove"
+                          style={{
+                            visibility:
+                              !editing && formData.milestones.length === 1
+                                ? "hidden"
+                                : "visible",
+                          }}
                         >
                           X
                         </button>
                       </div>
-
-                      <div className="issue-desc-row">
+                      <div className="milestone-desc-row">
                         <textarea
                           rows="2"
-                          value={iss.description}
+                          value={m.description}
                           onChange={(e) =>
-                            handleIssueChange(
-                              issIndex,
+                            handleMilestoneChange(
+                              index,
                               "description",
                               e.target.value,
                             )
                           }
-                          placeholder="Descrição detalhada da issue..."
-                          className="issue-textarea"
+                          placeholder="Descrição detalhada do marco..."
+                          className="milestone-textarea"
                         />
-                      </div>
-
-                      <div className="sub-section">
-                        <label className="sub-section-title">
-                          Etiquetas (Labels):
-                        </label>
-                        <div className="issue-labels-wrapper">
-                          {formData.labels.map((lbl) => {
-                            const isSelected = (iss.labels || []).includes(
-                              lbl.name,
-                            );
-                            const colorHex = lbl.color.startsWith("#")
-                              ? lbl.color
-                              : `#${lbl.color}`;
-                            return (
-                              <button
-                                key={lbl.name}
-                                type="button"
-                                onClick={() =>
-                                  handleToggleIssueLabel(issIndex, lbl.name)
-                                }
-                                className={`chip-label ${isSelected ? "selected" : ""}`}
-                                style={{
-                                  backgroundColor: isSelected
-                                    ? colorHex
-                                    : "#f0f2f5",
-                                  color: isSelected ? "#ffffff" : "#444444",
-                                  borderColor: colorHex,
-                                }}
-                              >
-                                {lbl.name} {isSelected ? "✓" : "+"}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="sub-section">
-                        <label className="sub-section-title">
-                          Entregáveis:
-                        </label>
-                        {iss.entregaveis.map((ent, eIdx) => (
-                          <div key={eIdx} className="sub-row">
-                            <input
-                              type="text"
-                              value={ent}
-                              onChange={(e) =>
-                                handleIssueArrayChange(
-                                  issIndex,
-                                  "entregaveis",
-                                  eIdx,
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Ex: Ata das oficinas..."
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                removeIssueItem(issIndex, "entregaveis", eIdx)
-                              }
-                              className="btn-remove-sm"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => addIssueItem(issIndex, "entregaveis")}
-                          className="btn-text"
-                        >
-                          + Adicionar Entregável
-                        </button>
-                      </div>
-
-                      <div className="sub-section">
-                        <label className="sub-section-title">
-                          Critérios de Aceite:
-                        </label>
-                        {iss.criterios_aceite.map((crit, cIdx) => (
-                          <div key={cIdx} className="sub-row">
-                            <input
-                              type="text"
-                              value={crit}
-                              onChange={(e) =>
-                                handleIssueArrayChange(
-                                  issIndex,
-                                  "criterios_aceite",
-                                  cIdx,
-                                  e.target.value,
-                                )
-                              }
-                              placeholder="Ex: Órgão demandante valida..."
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                removeIssueItem(
-                                  issIndex,
-                                  "criterios_aceite",
-                                  cIdx,
-                                )
-                              }
-                              className="btn-remove-sm"
-                            >
-                              ×
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() =>
-                            addIssueItem(issIndex, "criterios_aceite")
-                          }
-                          className="btn-text"
-                        >
-                          + Adicionar Critério
-                        </button>
                       </div>
                     </div>
                   ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={addIssue}
-                  className="btn-secondary"
-                  style={{ marginTop: "15px" }}
-                  title={`Adiciona uma issue na fase ${effectiveTab || "atual"}`}
-                >
-                  + Adicionar Nova Issue
-                </button>
-              </div>
-            )}
-
-            {/* PASSO 6 */}
-            {step === 6 && (
-              <div className="step-panel">
-                <h2>Revisão e Confirmação</h2>
-                <div className="summary-box">
-                  <p>
-                    <strong>Repositório:</strong> {formData.owner}/
-                    {formData.repo}
-                  </p>
-                  <p>
-                    <strong>Painel de Projeto:</strong>{" "}
-                    {formData.projectNumber
-                      ? `Vincular ao Project existente #${formData.projectNumber}`
-                      : formData.createProject
-                        ? `Criar novo painel "${formData.projectTitle}"`
-                        : "Nenhum projeto vinculado"}
-                  </p>
-                  <p>
-                    <strong>Fases a criar agora:</strong>{" "}
-                    {selectedPhases.length === formData.milestones.length
-                      ? "todas"
-                      : selectedPhases.join(", ") || "nenhuma"}
-                  </p>
-                  <p>
-                    <strong>Marcos:</strong> {visibleMilestones.length} de{" "}
-                    {formData.milestones.length}
-                  </p>
-                  <p>
-                    <strong>Labels:</strong> {visibleLabels.length}
-                  </p>
-                  <p>
-                    <strong>Issues a criar:</strong> {visibleIssues.length}
-                  </p>
-                </div>
-
-                <div className="checkbox-group">
-                  <label title="Desmarque para simular (dry-run): valida tudo sem criar nada no GitHub.">
-                    <input
-                      type="checkbox"
-                      name="apply"
-                      checked={formData.apply}
-                      onChange={handleInputChange}
-                    />{" "}
-                    Aplicar no GitHub
-                  </label>
-
-                  <label
-                    style={{
-                      opacity: formData.projectNumber ? 0.5 : 1,
-                      cursor: formData.projectNumber
-                        ? "not-allowed"
-                        : "pointer",
-                    }}
-                    title={
-                      formData.projectNumber
-                        ? "Desabilitado: você informou o número de um Project existente no Passo 1."
-                        : "Cria também um painel Projects V2 no GitHub e adiciona as issues a ele."
-                    }
-                  >
-                    <input
-                      type="checkbox"
-                      name="createProject"
-                      disabled={Boolean(formData.projectNumber)}
-                      checked={
-                        formData.projectNumber ? false : formData.createProject
-                      }
-                      onChange={handleInputChange}
-                    />{" "}
-                    Criar Painel de Projeto (Projects V2)
-                  </label>
-                </div>
-              </div>
-            )}
-
-            {message && (
-              <div
-                className={`message ${message.includes("Erro") ? "error" : "success"}`}
-              >
-                {message}
-              </div>
-            )}
-
-            {/* F1: detalhamento do que foi criado */}
-            {result && (
-              <div className="summary-box" style={{ marginTop: "12px" }}>
-                <p>
-                  <strong>Status:</strong>{" "}
-                  {result.status === "partial" ? "Parcial" : "Concluído"}
-                </p>
-                <p>
-                  <strong>Issues criadas:</strong>{" "}
-                  {(result.issues_created || []).length}
-                </p>
-                {result.project_error && (
-                  <p style={{ color: "#b00020" }}>
-                    <strong>Painel de projeto:</strong> {result.project_error}
-                  </p>
-                )}
-              </div>
-            )}
-
-            <div
-              className="form-actions"
-              style={{
-                marginTop: "24px",
-                display: "flex",
-                justifyContent: "space-between",
-              }}
-            >
-              {step > 1 && (
-                <button
-                  type="button"
-                  onClick={prevStep}
-                  className="btn-secondary"
-                  title="Volta um passo (nada é perdido)"
-                >
-                  Voltar
-                </button>
-              )}
-              {step === 1 && <div />}
-
-              {step < 6 && (
-                <button
-                  type="button"
-                  onClick={nextStep}
-                  className="btn-primary"
-                  disabled={step === 1 && selectedPhases.length === 0}
-                  title={
-                    step === 1 && selectedPhases.length === 0
-                      ? "Selecione ao menos uma fase para continuar"
-                      : "Avança para o próximo passo"
-                  }
-                >
-                  Próximo
-                </button>
-              )}
-              {step === 6 && (
-                <div style={{ textAlign: "right" }}>
                   <button
-                    onClick={handleSubmit}
-                    disabled={
-                      loading || !user?.has_pat || selectedPhases.length === 0
-                    }
-                    className="btn-success"
-                    title={
-                      !user?.has_pat
-                        ? "Configure um PAT no perfil antes de aplicar"
-                        : "Cria/registra o projeto e aplica as fases selecionadas"
-                    }
+                    type="button"
+                    onClick={addMilestone}
+                    className="btn-secondary"
+                    style={{ marginTop: "10px" }}
+                    title="Cria um novo marco (milestone) e o adiciona às fases a criar."
                   >
-                    {loading
-                      ? "Processando... (pode levar alguns minutos)"
-                      : "Finalizar e Enviar"}
+                    + Adicionar Milestone
                   </button>
-                  {formData.apply && (
-                    <div
-                      style={{
-                        color: "#666",
-                        fontSize: "0.8rem",
-                        marginTop: "6px",
-                      }}
-                    >
-                      As issues são criadas uma a uma na API do GitHub; para
-                      backlogs grandes isso leva alguns minutos.
+                </div>
+              )}
+
+              {/* PASSO 5 */}
+              {step === 5 && (
+                <div className="step-panel">
+                  <h2>Issues e Entregáveis</h2>
+                  <p
+                    className="subtitle"
+                    style={{
+                      color: "#666",
+                      fontSize: "0.9rem",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    Cadastre as atividades, entregáveis e critérios de aceite
+                    vinculados aos marcos. Uma aba por fase.
+                  </p>
+
+                  <div
+                    className="issue-tabs"
+                    role="tablist"
+                    title="Cada aba mostra as issues de uma fase (milestone)"
+                  >
+                    {tabPhases.map((k) => {
+                      const count = formData.issues.filter(
+                        (i) => i.milestone === k,
+                      ).length;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          className={`issue-tab ${k === effectiveTab ? "active" : ""}`}
+                          onClick={() => setActiveIssueTab(k)}
+                          title={`Ver e editar as issues da fase ${k}`}
+                        >
+                          {k} <span className="issue-tab-count">{count}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="issues-scroll-container">
+                    {tabIssues.length === 0 && (
+                      <p style={{ color: "#666" }}>
+                        Nenhuma issue nesta fase. Use “+ Adicionar Nova Issue”.
+                      </p>
+                    )}
+                    {tabIssues.map(({ iss, i: issIndex }) => (
+                      <div key={issIndex} className="issue-card-box">
+                        <div className="issue-top-row">
+                          <div className="order-buttons">
+                            <button
+                              type="button"
+                              aria-label={`Mover issue ${iss.title} para cima`}
+                              disabled={issIndex === 0}
+                              onClick={() => move("issues", issIndex, -1)}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Mover issue ${iss.title} para baixo`}
+                              disabled={issIndex === formData.issues.length - 1}
+                              onClick={() => move("issues", issIndex, 1)}
+                            >
+                              ↓
+                            </button>
+                          </div>
+                          <span
+                            className="phase-badge created"
+                            title="Fase (milestone) desta issue"
+                          >
+                            {iss.milestone}
+                          </span>
+                          <input
+                            type="text"
+                            value={iss.title}
+                            onChange={(e) =>
+                              handleIssueChange(
+                                issIndex,
+                                "title",
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Título da Issue (ex: [Atividade] ...)"
+                            className="issue-title-input"
+                          />
+                          <select
+                            value={iss.milestone}
+                            onChange={(e) =>
+                              handleIssueChange(
+                                issIndex,
+                                "milestone",
+                                e.target.value,
+                              )
+                            }
+                            className="issue-milestone-select"
+                          >
+                            {formData.milestones.map((m) => (
+                              <option key={m.key} value={m.key}>
+                                {m.key}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => removeIssue(issIndex)}
+                            className="btn-remove"
+                          >
+                            X
+                          </button>
+                        </div>
+
+                        <div className="issue-desc-row">
+                          <textarea
+                            rows="2"
+                            value={iss.description}
+                            onChange={(e) =>
+                              handleIssueChange(
+                                issIndex,
+                                "description",
+                                e.target.value,
+                              )
+                            }
+                            placeholder="Descrição detalhada da issue..."
+                            className="issue-textarea"
+                          />
+                        </div>
+
+                        <div className="sub-section">
+                          <label className="sub-section-title">
+                            Etiquetas (Labels):
+                          </label>
+                          <div className="issue-labels-wrapper">
+                            {formData.labels.map((lbl) => {
+                              const isSelected = (iss.labels || []).includes(
+                                lbl.name,
+                              );
+                              const colorHex = lbl.color.startsWith("#")
+                                ? lbl.color
+                                : `#${lbl.color}`;
+                              return (
+                                <button
+                                  key={lbl.name}
+                                  type="button"
+                                  onClick={() =>
+                                    handleToggleIssueLabel(issIndex, lbl.name)
+                                  }
+                                  className={`chip-label ${isSelected ? "selected" : ""}`}
+                                  style={{
+                                    backgroundColor: isSelected
+                                      ? colorHex
+                                      : "#f0f2f5",
+                                    color: isSelected ? "#ffffff" : "#444444",
+                                    borderColor: colorHex,
+                                  }}
+                                >
+                                  {lbl.name} {isSelected ? "✓" : "+"}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="sub-section">
+                          <label className="sub-section-title">
+                            Entregáveis:
+                          </label>
+                          {iss.entregaveis.map((ent, eIdx) => (
+                            <div key={eIdx} className="sub-row">
+                              <input
+                                type="text"
+                                value={ent}
+                                onChange={(e) =>
+                                  handleIssueArrayChange(
+                                    issIndex,
+                                    "entregaveis",
+                                    eIdx,
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="Ex: Ata das oficinas..."
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  removeIssueItem(issIndex, "entregaveis", eIdx)
+                                }
+                                className="btn-remove-sm"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              addIssueItem(issIndex, "entregaveis")
+                            }
+                            className="btn-text"
+                          >
+                            + Adicionar Entregável
+                          </button>
+                        </div>
+
+                        <div className="sub-section">
+                          <label className="sub-section-title">
+                            Critérios de Aceite:
+                          </label>
+                          {iss.criterios_aceite.map((crit, cIdx) => (
+                            <div key={cIdx} className="sub-row">
+                              <input
+                                type="text"
+                                value={crit}
+                                onChange={(e) =>
+                                  handleIssueArrayChange(
+                                    issIndex,
+                                    "criterios_aceite",
+                                    cIdx,
+                                    e.target.value,
+                                  )
+                                }
+                                placeholder="Ex: Órgão demandante valida..."
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  removeIssueItem(
+                                    issIndex,
+                                    "criterios_aceite",
+                                    cIdx,
+                                  )
+                                }
+                                className="btn-remove-sm"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              addIssueItem(issIndex, "criterios_aceite")
+                            }
+                            className="btn-text"
+                          >
+                            + Adicionar Critério
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={addIssue}
+                    disabled={formData.milestones.length === 0}
+                    className="btn-secondary"
+                    style={{ marginTop: "15px" }}
+                    title={`Adiciona uma issue na fase ${effectiveTab || "atual"}`}
+                  >
+                    + Adicionar Nova Issue
+                  </button>
+                </div>
+              )}
+
+              {/* PASSO 6 */}
+              {step === 6 && (
+                <div className="step-panel">
+                  <h2>Revisão e Confirmação</h2>
+                  <div className="summary-box">
+                    <p>
+                      <strong>Repositório:</strong> {formData.owner}/
+                      {formData.repo}
+                    </p>
+                    <p>
+                      <strong>Painel de Projeto:</strong>{" "}
+                      {formData.projectNumber
+                        ? `Vincular ao Project existente #${formData.projectNumber}`
+                        : formData.createProject
+                          ? `Criar novo painel "${formData.projectTitle}"`
+                          : "Nenhum projeto vinculado"}
+                    </p>
+                    <p>
+                      <strong>
+                        {editing
+                          ? "Fases selecionadas:"
+                          : "Fases a criar agora:"}
+                      </strong>{" "}
+                      {selectedPhases.length === formData.milestones.length
+                        ? "todas"
+                        : selectedPhases.join(", ") || "nenhuma"}
+                    </p>
+                    <p>
+                      <strong>Marcos:</strong> {visibleMilestones.length} de{" "}
+                      {formData.milestones.length}
+                    </p>
+                    <p>
+                      <strong>Labels:</strong> {visibleLabels.length}
+                    </p>
+                    <p>
+                      <strong>
+                        {editing ? "Issues do template:" : "Issues a criar:"}
+                      </strong>{" "}
+                      {visibleIssues.length}
+                    </p>
+                  </div>
+
+                  {editing && (
+                    <div className="form-group">
+                      <label htmlFor="change-note">
+                        Descrição da alteração (opcional)
+                      </label>
+                      <input
+                        id="change-note"
+                        value={changeNote}
+                        onChange={(event) => setChangeNote(event.target.value)}
+                        maxLength={2000}
+                        placeholder="Ex.: atualização do owner e das atividades"
+                      />
+                    </div>
+                  )}
+                  {!editing && (
+                    <div className="checkbox-group">
+                      <label title="Desmarque para simular (dry-run): valida tudo sem criar nada no GitHub.">
+                        <input
+                          type="checkbox"
+                          name="apply"
+                          checked={formData.apply}
+                          onChange={handleInputChange}
+                        />{" "}
+                        Aplicar no GitHub
+                      </label>
+
+                      <label
+                        style={{
+                          opacity: formData.projectNumber ? 0.5 : 1,
+                          cursor: formData.projectNumber
+                            ? "not-allowed"
+                            : "pointer",
+                        }}
+                        title={
+                          formData.projectNumber
+                            ? "Desabilitado: você informou o número de um Project existente no Passo 1."
+                            : "Cria também um painel Projects V2 no GitHub e adiciona as issues a ele."
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          name="createProject"
+                          disabled={Boolean(formData.projectNumber)}
+                          checked={
+                            formData.projectNumber
+                              ? false
+                              : formData.createProject
+                          }
+                          onChange={handleInputChange}
+                        />{" "}
+                        Criar Painel de Projeto (Projects V2)
+                      </label>
                     </div>
                   )}
                 </div>
               )}
+
+              {!editing && message && (
+                <div
+                  className={`message ${message.includes("Erro") ? "error" : "success"}`}
+                >
+                  {message}
+                </div>
+              )}
+
+              {/* F1: detalhamento do que foi criado */}
+              {result && (
+                <div className="summary-box" style={{ marginTop: "12px" }}>
+                  <p>
+                    <strong>Status:</strong>{" "}
+                    {result.status === "partial" ? "Parcial" : "Concluído"}
+                  </p>
+                  <p>
+                    <strong>Issues criadas:</strong>{" "}
+                    {(result.issues_created || []).length}
+                  </p>
+                  {result.project_error && (
+                    <p style={{ color: "#b00020" }}>
+                      <strong>Painel de projeto:</strong> {result.project_error}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div
+                className="form-actions"
+                style={{
+                  marginTop: "24px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                {step > 1 && (
+                  <button
+                    type="button"
+                    onClick={prevStep}
+                    className="btn-secondary"
+                    title="Volta um passo (nada é perdido)"
+                  >
+                    Voltar
+                  </button>
+                )}
+                {step === 1 && <div />}
+
+                {step < 6 && (
+                  <button
+                    type="button"
+                    onClick={nextStep}
+                    className="btn-primary"
+                    disabled={
+                      !editing && step === 1 && selectedPhases.length === 0
+                    }
+                    title={
+                      step === 1 && selectedPhases.length === 0
+                        ? "Selecione ao menos uma fase para continuar"
+                        : "Avança para o próximo passo"
+                    }
+                  >
+                    Próximo
+                  </button>
+                )}
+                {step === 6 && (
+                  <div style={{ textAlign: "right" }}>
+                    <button
+                      onClick={handleSubmit}
+                      disabled={
+                        loading ||
+                        (editing
+                          ? !dirty
+                          : !user?.has_pat || selectedPhases.length === 0)
+                      }
+                      className="btn-success"
+                      title={
+                        editing
+                          ? "Salva o template completo como uma nova versão"
+                          : !user?.has_pat
+                            ? "Configure um PAT no perfil antes de aplicar"
+                            : "Cria/registra o projeto e aplica as fases selecionadas"
+                      }
+                    >
+                      {editing
+                        ? loading
+                          ? "Salvando…"
+                          : "Salvar nova versão"
+                        : loading
+                          ? "Processando... (pode levar alguns minutos)"
+                          : "Finalizar e Enviar"}
+                    </button>
+                    {!editing && formData.apply && (
+                      <div
+                        style={{
+                          color: "#666",
+                          fontSize: "0.8rem",
+                          marginTop: "6px",
+                        }}
+                      >
+                        As issues são criadas uma a uma na API do GitHub; para
+                        backlogs grandes isso leva alguns minutos.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          </fieldset>
         </div>
       </div>
     </div>

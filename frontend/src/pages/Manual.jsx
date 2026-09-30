@@ -102,6 +102,28 @@ export default function Manual() {
         </li>
       </ul>
 
+      <h2>4.1. Editar o projeto e consultar versões</h2>
+      <p>
+        Na tela do projeto, use <strong>Editar projeto</strong> para alterar
+        owner, repositório, título, datas, marcos, labels, issues, entregáveis e
+        critérios. Cada clique em <strong>Salvar nova versão</strong> guarda o
+        template completo. O botão fica disponível quando há alterações
+        pendentes.
+      </p>
+      <p>
+        Use <strong>Histórico de versões</strong> para ver autor, data,
+        descrição e conteúdo de cada versão.{" "}
+        <strong>Voltar à versão anterior</strong> abre uma prévia para
+        confirmação. Restaurar uma versão cria outra com seu conteúdo, incluindo
+        itens excluídos e a ordem original, preservando o histórico.
+      </p>
+      <p>
+        Owner e repositório definem o destino das próximas operações no GitHub.
+        Salvar ou restaurar guarda a configuração no aplicativo; isso não
+        transfere repositórios nem altera automaticamente as issues que já
+        existem no GitHub.
+      </p>
+
       <h2>5. Organização, tenant e papéis</h2>
       <ul>
         <li>
