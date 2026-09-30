@@ -18,6 +18,7 @@ from backend.app.routers import (
     orgs,
     profile,
     projects,
+    project_versions,
     roadmap,
 )
 
@@ -38,6 +39,7 @@ app.include_router(auth.router)
 app.include_router(profile.router)
 app.include_router(orgs.router)
 app.include_router(projects.router)
+app.include_router(project_versions.router)
 app.include_router(dashboards.router)
 app.include_router(roadmap.router)
 

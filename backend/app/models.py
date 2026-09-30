@@ -1,14 +1,13 @@
 """Modelos ORM.
 
-PR1: `User`. PR2: `Project`. PR3: `PhaseRun`. PR4: `Organization`,
-`OrgMembership`.
+Usuários, projetos, versões de configuração, aplicações de fases e organizações.
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.db import Base
@@ -66,13 +65,34 @@ class Project(Base):
     source: Mapped[str] = mapped_column(String(16), default="created")
     # Preenchido no PR4 (multi-tenant); nulo = conta pessoal.
     org_login: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    current_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # Config do roadmap (milestones/labels/issues) informada no wizard.
-    # Usada para aplicar issues por fase; vazio => cai no template do repo.
+    # Cópia efetiva da versão atual, usada para aplicar issues por fase.
     config_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}")
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
+
+
+class ProjectVersion(Base):
+    """Snapshot imutável de toda a configuração local de um projeto."""
+
+    __tablename__ = "project_versions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_project_version"),
+        CheckConstraint("version >= 1", name="ck_project_version_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    snapshot_json: Mapped[str] = mapped_column(Text)
+    change_note: Mapped[str] = mapped_column(Text)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    author_login: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    restored_from_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class PhaseRun(Base):
@@ -83,6 +103,9 @@ class PhaseRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    project_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("project_versions.id"), nullable=True, index=True
+    )
     phase_key: Mapped[str] = mapped_column(String(32))
     created_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_count: Mapped[int] = mapped_column(Integer, default=0)

@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
+from copy import deepcopy
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import select
+from pydantic import BaseModel, field_validator
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.app.db import get_db
 from backend.app.deps import require_user
 from backend.app.github import humanize_error
-from backend.app.models import PhaseRun, Project, User
+from backend.app.models import PhaseRun, Project, ProjectVersion, User
 from backend.app.routers.roadmap import RoadmapPayload
 from backend.app.security import decrypt_pat
 from backend.app.services.dashboards import collect_issues
@@ -23,6 +25,10 @@ from backend.app.services.roadmap import (
     build_roadmap,
     load_backlog_template,
     phase_status,
+)
+
+from backend.app.services.project_versions import (
+    ensure_initial_version, project_config, save_version, snapshot_for,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +45,13 @@ class PhaseApplyPayload(BaseModel):
     on_duplicate: str = "skip"  # "skip" | "error"
     apply: bool = True
     project_start_date: str | None = None
+
+    @field_validator("project_start_date")
+    @classmethod
+    def valid_date(cls, value):
+        if value is not None and date.fromisoformat(value).isoformat() != value:
+            raise ValueError("Use uma data válida AAAA-MM-DD.")
+        return value
 
 
 def _pat(user: User) -> str:
@@ -62,6 +75,7 @@ def _project_dict(p: Project) -> dict:
         "project_number": p.project_number,
         "project_url": p.project_url,
         "source": p.source,
+        "current_version": p.current_version,
         "created_at": p.created_at.isoformat() if p.created_at else None,
     }
 
@@ -77,27 +91,37 @@ def _upsert_project(
     project_number: int | None = None,
     project_url: str | None = None,
     config: dict | None = None,
+    phase_keys: list[str] | None = None,
+    base_version: int | None = None,
+    change_note: str = "Configuração inicial",
 ) -> Project:
-    p = db.execute(
-        select(Project).where(
-            Project.created_by_user_id == user.id,
-            Project.owner == owner,
-            Project.repo == repo,
-        )
-    ).scalar_one_or_none()
+    p = db.scalar(select(Project).where(
+        Project.created_by_user_id == user.id, Project.owner == owner, Project.repo == repo,
+    ))
     if p is None:
-        p = Project(created_by_user_id=user.id, owner=owner, repo=repo, source=source)
+        p = Project(created_by_user_id=user.id, owner=owner, repo=repo, source=source,
+                    title=title, org_login=owner)
         db.add(p)
-    # tenant: o owner do repo (org ou conta pessoal).
-    p.org_login = owner
+        db.flush()
+        snapshot = snapshot_for(p, config if config is not None else load_backlog_template(), phase_keys)
+    else:
+        current = ensure_initial_version(db, user, p)
+        snapshot = json.loads(current.snapshot_json)
+        if config is not None:
+            snapshot["config"] = config
+            snapshot["phase_keys"] = phase_keys
     if title:
-        p.title = title
+        snapshot["title"] = title
     if project_number is not None:
-        p.project_number = project_number
+        if snapshot["project_number"] != project_number:
+            snapshot["project_url"] = None
+        snapshot["project_number"] = project_number
     if project_url is not None:
-        p.project_url = project_url
-    if config:
-        p.config_json = json.dumps(config)
+        snapshot["project_url"] = project_url
+    save_version(
+        db, user, p, base_version=p.current_version if base_version is None else base_version,
+        snapshot=snapshot, change_note=change_note,
+    )
     db.commit()
     db.refresh(p)
     return p
@@ -111,14 +135,7 @@ def _project_or_404(db: Session, user: User, project_id: int) -> Project:
 
 
 def _project_cfg(p: Project) -> dict:
-    """Config do wizard guardada no projeto; se vazia, cai no template do repo."""
-    try:
-        cfg = json.loads(p.config_json or "{}")
-    except json.JSONDecodeError:
-        cfg = {}
-    if cfg.get("issues"):
-        return cfg
-    return load_backlog_template()
+    return project_config(p)
 
 
 @router.get("")
@@ -169,6 +186,18 @@ def create_project_endpoint(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    existing = db.scalar(select(Project).where(
+        Project.created_by_user_id == user.id,
+        Project.owner == payload.owner, Project.repo == payload.repo,
+    ))
+    expected_version = 0
+    if existing is not None:
+        expected_version = ensure_initial_version(db, user, existing).version
+    if payload.base_version is not None and payload.base_version != expected_version:
+        raise HTTPException(409, "O projeto foi alterado. Recarregue antes de salvar.")
+    config = deepcopy(payload.config)
+    if payload.project_start_date and isinstance(config.get("schedule"), dict):
+        config["schedule"]["project_start_date"] = payload.project_start_date
     token = _pat(user)
     result = build_roadmap(
         token=token,
@@ -179,7 +208,7 @@ def create_project_endpoint(
         project_title=payload.project_title,
         project_number=payload.project_number,
         project_start_date=payload.project_start_date,
-        cfg=payload.config,
+        cfg=config,
         phase_keys=payload.phase_keys or None,
     )
 
@@ -203,7 +232,10 @@ def create_project_endpoint(
         source="created",
         project_number=number,
         project_url=url,
-        config=payload.config,
+        config=config,
+        phase_keys=payload.phase_keys or None,
+        base_version=expected_version,
+        change_note=payload.change_note,
     )
     return {**result, "project": _project_dict(project)}
 
@@ -248,6 +280,7 @@ def get_phases(
     history = [
         {
             "phase": r.phase_key,
+            "project_version_id": r.project_version_id,
             "created": r.created_count,
             "updated": r.updated_count,
             "skipped": r.skipped_count,
@@ -271,15 +304,26 @@ def apply_project_phase(
     db: Session = Depends(get_db),
 ):
     p = _project_or_404(db, user, project_id)
+    token = _pat(user)
+    version = ensure_initial_version(db, user, p)
+    snapshot = json.loads(version.snapshot_json)
+    if body.project_start_date and body.project_start_date != snapshot["config"].get("schedule", {}).get("project_start_date"):
+        snapshot["config"].setdefault("schedule", {})["project_start_date"] = body.project_start_date
+        if body.apply:
+            version = save_version(
+                db, user, p, base_version=version.version, snapshot=snapshot,
+                change_note=f"Data de início alterada ao aplicar a fase {phase_key}",
+            )
+            db.commit()
     result = apply_phase(
-        token=_pat(user),
+        token=token,
         owner=p.owner,
         repo=p.repo,
-        cfg=_project_cfg(p),
+        cfg=snapshot["config"],
         phase_key=phase_key,
         on_duplicate=body.on_duplicate,
         apply=body.apply,
-        project_number=p.project_number,
+        project_number=snapshot["project_number"],
         project_start_date=body.project_start_date,
     )
     if result.get("status") == "applied":
@@ -288,6 +332,7 @@ def apply_project_phase(
                 project_id=p.id,
                 user_id=user.id,
                 phase_key=phase_key,
+                project_version_id=version.id,
                 created_count=result.get("created", 0),
                 updated_count=result.get("updated", 0),
                 skipped_count=result.get("skipped", 0),
@@ -343,6 +388,9 @@ def delete_project(
     p = db.get(Project, project_id)
     if p is None or p.created_by_user_id != user.id:
         raise HTTPException(status_code=404, detail="Projeto não encontrado.")
+    # Remover o registro local também remove seu histórico dependente.
+    db.execute(delete(PhaseRun).where(PhaseRun.project_id == p.id))
+    db.execute(delete(ProjectVersion).where(ProjectVersion.project_id == p.id))
     db.delete(p)
     db.commit()
     return {"ok": True}

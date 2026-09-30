@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.app.deps import require_user
 from backend.app.models import User
@@ -26,6 +26,9 @@ class RoadmapPayload(BaseModel):
     # Fases (milestone keys) a criar agora. None/vazio = todas.
     phase_keys: list[str] | None = None
     config: dict[str, Any]
+    # Opcional no wizard legado; clientes novos enviam a versão que editaram.
+    base_version: int | None = Field(default=None, ge=0, strict=True)
+    change_note: str = Field(default="Configuração salva pelo wizard", max_length=2000)
 
 
 def _user_pat(user: User) -> str:
